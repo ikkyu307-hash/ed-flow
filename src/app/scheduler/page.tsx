@@ -114,6 +114,15 @@ export default function SchedulerPage() {
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [authLoading, setAuthLoading] = useState(true);
 
+  // Teacher Onboarding State
+  const [isOnboarded, setIsOnboarded] = useState<boolean>(true);
+  const [onboardingName, setOnboardingName] = useState("");
+  const [onboardingSubject, setOnboardingSubject] = useState("คณิตศาสตร์");
+  const [savingOnboarding, setSavingOnboarding] = useState(false);
+
+  // Course filter state
+  const [showMyCoursesOnly, setShowMyCoursesOnly] = useState<boolean>(false);
+
   // Master lists
   const [teachers, setTeachers] = useState<Teacher[]>(INITIAL_TEACHERS);
   const [classrooms, setClassrooms] = useState<Classroom[]>(INITIAL_CLASSROOMS);
@@ -166,26 +175,63 @@ export default function SchedulerPage() {
 
   const [groupName, setGroupName] = useState("");
 
-  // Check authentication
+  // Check authentication & onboarding status
   useEffect(() => {
-    if (!isSupabaseConfigured || !supabase) {
-      setAuthLoading(false);
-      // Simulating a mock local user
-      setCurrentUser({ email: "offline-admin@school.ac.th", user_metadata: { full_name: "ครูแอดมินระบบจำลอง" } });
-      return;
-    }
+    const checkAuthAndProfile = async () => {
+      if (!isSupabaseConfigured || !supabase) {
+        // Simulating a mock local user
+        const mockUser = { id: "mock-admin-id", email: "offline-admin@school.ac.th", user_metadata: { full_name: "ครูแอดมินระบบจำลอง" } };
+        setCurrentUser(mockUser);
+        
+        // Check offline onboarding
+        const savedProfile = localStorage.getItem("onboarded_teacher");
+        if (savedProfile) {
+          const parsed = JSON.parse(savedProfile);
+          // Add onboarded teacher to lists if not exists
+          setTeachers((prev) => {
+            if (prev.some((t) => t.id === parsed.id)) return prev;
+            return [...prev, parsed];
+          });
+          setIsOnboarded(true);
+        } else {
+          setIsOnboarded(false);
+        }
+        setAuthLoading(false);
+        return;
+      }
 
-    const checkUser = async () => {
+      // Check real Supabase Auth
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
         router.push("/login");
-      } else {
-        setCurrentUser(user);
+        return;
+      }
+
+      setCurrentUser(user);
+
+      // Check if this user exists in the teachers table
+      try {
+        const { data: teacher, error } = await supabase
+          .from("teachers")
+          .select("*")
+          .eq("id", user.id)
+          .single();
+
+        if (error || !teacher) {
+          // Profile doesn't exist, trigger onboarding
+          setIsOnboarded(false);
+        } else {
+          setIsOnboarded(true);
+        }
+      } catch (err) {
+        console.error("Error loading user profile:", err);
+        setIsOnboarded(false);
+      } finally {
         setAuthLoading(false);
       }
     };
 
-    checkUser();
+    checkAuthAndProfile();
   }, [router]);
 
   // Fetch initial data from Supabase
@@ -297,16 +343,6 @@ export default function SchedulerPage() {
     };
   }, []);
 
-  // Theme Toggle Effect
-  useEffect(() => {
-    const root = document.documentElement;
-    if (isDarkMode) {
-      root.classList.remove("light-theme");
-    } else {
-      root.classList.add("light-theme");
-    }
-  }, [isDarkMode]);
-
   // Seeding Initial Data
   const handleSeedDatabase = async () => {
     if (!isSupabaseConfigured || !supabase) return;
@@ -354,12 +390,61 @@ export default function SchedulerPage() {
     }
   };
 
+  // Onboarding Submit
+  const handleOnboardingSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!onboardingName || !onboardingSubject) return;
+
+    setSavingOnboarding(true);
+    const teacherId = currentUser?.id || "mock-admin-id";
+    const newTeacher: Teacher = {
+      id: teacherId,
+      name: onboardingName,
+      subject: onboardingSubject
+    };
+
+    try {
+      if (isSupabaseConfigured && supabase) {
+        const { error } = await supabase.from("teachers").upsert([
+          {
+            id: teacherId,
+            name: onboardingName,
+            subject: onboardingSubject
+          }
+        ]);
+        if (error) throw error;
+      } else {
+        // Offline Mock mode Onboarding
+        localStorage.setItem("onboarded_teacher", JSON.stringify(newTeacher));
+      }
+
+      setTeachers((prev) => {
+        if (prev.some((t) => t.id === teacherId)) {
+          return prev.map((t) => (t.id === teacherId ? newTeacher : t));
+        }
+        return [...prev, newTeacher];
+      });
+
+      setIsOnboarded(true);
+      if (isSupabaseConfigured && supabase) {
+        await fetchInitialData();
+      }
+      alert("บันทึกข้อมูลครูและปลดล็อกระบบเรียบร้อย!");
+    } catch (err: any) {
+      console.error(err);
+      alert("เกิดข้อผิดพลาดในการบันทึกข้อมูลครู: " + err.message);
+    } finally {
+      setSavingOnboarding(false);
+    }
+  };
+
   // Sign out
   const handleSignOut = async () => {
     if (confirm("ต้องการออกจากระบบเข้าสู่หน้าหลัก?")) {
       if (isSupabaseConfigured && supabase) {
         await supabase.auth.signOut();
       }
+      localStorage.removeItem("onboarded_teacher");
       router.push("/login");
     }
   };
@@ -700,6 +785,17 @@ export default function SchedulerPage() {
 
   const visibleSchedules = getFilteredSchedules();
   
+  // Filter draggable courses based on "Show only my courses"
+  const getFilteredCourses = () => {
+    if (showMyCoursesOnly && currentUser) {
+      const myId = currentUser.id || "mock-admin-id";
+      return courses.filter((c) => c.defaultTeacherId === myId);
+    }
+    return courses;
+  };
+
+  const visibleCourses = getFilteredCourses();
+
   // Active conflicts list
   const allConflictsList = schedules
     .map((s) => ({ slot: s, conflicts: getConflictsForSlot(s) }))
@@ -712,6 +808,80 @@ export default function SchedulerPage() {
         <div style={{ textAlign: "center" }}>
           <div className="logo-icon" style={{ margin: "0 auto 1.5rem", width: "64px", height: "64px", fontSize: "1.75rem", animation: "pulseHazard 2s infinite" }}>EF</div>
           <h2>กำลังยืนยันสิทธิ์เข้าใช้ระบบวิชาการ...</h2>
+        </div>
+      </div>
+    );
+  }
+
+  // ONBOARDING SCREEN INTERFACE
+  if (!isOnboarded) {
+    return (
+      <div className="scheduler-container" style={{ justifyContent: "center", alignItems: "center", minHeight: "100vh" }}>
+        <div className="modal-content" style={{ width: "100%", maxWidth: "440px", padding: "2.5rem", borderRadius: "20px" }}>
+          <div className="modal-header" style={{ textAlign: "center" }}>
+            <div className="logo-icon" style={{ margin: "0 auto 1rem", width: "48px", height: "48px", fontSize: "1.5rem" }}>EF</div>
+            <h2 className="modal-title" style={{ fontSize: "1.5rem" }}>
+              ตั้งค่าคุณครูแรกเข้า
+            </h2>
+            <p className="modal-subtitle">
+              ระบุประวัติบุคลากรของคุณก่อนเข้าจัดการระบบวิชาการ
+            </p>
+          </div>
+
+          <form className="modal-form" onSubmit={handleOnboardingSubmit}>
+            <div className="form-group">
+              <label className="form-label">ชื่อ - นามสกุลจริงของคุณครู</label>
+              <input
+                type="text"
+                className="select-input"
+                placeholder="เช่น ครูสมพงษ์ ใจเย็น"
+                value={onboardingName}
+                onChange={(e) => setOnboardingName(e.target.value)}
+                required
+              />
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">วิชาเอกที่รับผิดชอบหลัก</label>
+              <select
+                className="select-input"
+                value={onboardingSubject}
+                onChange={(e) => setOnboardingSubject(e.target.value)}
+                required
+              >
+                <option value="คณิตศาสตร์">คณิตศาสตร์</option>
+                <option value="วิทยาศาสตร์">วิทยาศาสตร์</option>
+                <option value="ภาษาอังกฤษ">ภาษาอังกฤษ</option>
+                <option value="ภาษาไทย">ภาษาไทย</option>
+                <option value="สังคมศึกษา">สังคมศึกษา</option>
+                <option value="คอมพิวเตอร์/เทคโนโลยี">คอมพิวเตอร์/เทคโนโลยี</option>
+                <option value="แนะแนว/กิจกรรม">แนะแนว/กิจกรรม</option>
+              </select>
+            </div>
+
+            <div style={{ marginTop: "1rem", fontSize: "0.8rem", color: "var(--text-secondary)", lineHeight: "1.4" }}>
+              ℹ️ <strong>รายละเอียดสิทธิ์</strong><br />
+              ชื่อและวิชาของคุณจะถูกบันทึกเข้ารายชื่อครูหลักของโรงเรียน เพื่อใช้สำหรับการผูกรายวิชาเรียนและแสดงผลตารางสอนส่วนบุคคล
+            </div>
+
+            <button 
+              type="submit" 
+              className="primary-btn" 
+              style={{ width: "100%", marginTop: "1.5rem", padding: "0.8rem" }} 
+              disabled={savingOnboarding}
+            >
+              {savingOnboarding ? "กำลังบันทึกข้อมูล..." : "✓ บันทึกข้อมูลและเริ่มใช้งาน"}
+            </button>
+            
+            <button 
+              type="button" 
+              className="secondary-btn" 
+              onClick={handleSignOut}
+              style={{ width: "100%", marginTop: "0.5rem", padding: "0.8rem", border: "none", color: "var(--accent-red)" }}
+            >
+              ยกเลิก / ออกจากระบบ
+            </button>
+          </form>
         </div>
       </div>
     );
@@ -804,23 +974,46 @@ export default function SchedulerPage() {
 
             {/* Draggable Subjects */}
             <div className="sidebar-section" style={{ flexGrow: 1 }}>
-              <label className="sidebar-title">วิชาเรียน (Drag to Timetable)</label>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <label className="sidebar-title">วิชาเรียน (Drag to Timetable)</label>
+              </div>
+              
+              {/* Filter checkbox: Show only my subjects */}
+              <div style={{ display: "flex", alignItems: "center", gap: "0.4rem", margin: "0.2rem 0 0.5rem", fontSize: "0.75rem", color: "var(--text-secondary)" }}>
+                <input
+                  type="checkbox"
+                  id="myCoursesFilter"
+                  checked={showMyCoursesOnly}
+                  onChange={(e) => setShowMyCoursesOnly(e.target.checked)}
+                  style={{ cursor: "pointer" }}
+                />
+                <label htmlFor="myCoursesFilter" style={{ cursor: "pointer", fontWeight: "bold" }}>
+                  แสดงเฉพาะวิชาที่ฉันสอน 🧑‍🏫
+                </label>
+              </div>
+
               <div className="draggable-list">
-                {courses.map((course) => (
-                  <div
-                    key={course.id}
-                    className="draggable-item"
-                    draggable
-                    onDragStart={(e) => handleDragStart(e, course.id)}
-                    onDragEnd={handleDragEnd}
-                  >
-                    <div className="course-info">
-                      <span className="course-name">{course.name}</span>
-                      <span className="course-code">{course.code}</span>
+                {visibleCourses.length > 0 ? (
+                  visibleCourses.map((course) => (
+                    <div
+                      key={course.id}
+                      className="draggable-item"
+                      draggable
+                      onDragStart={(e) => handleDragStart(e, course.id)}
+                      onDragEnd={handleDragEnd}
+                    >
+                      <div className="course-info">
+                        <span className="course-name">{course.name}</span>
+                        <span className="course-code">{course.code}</span>
+                      </div>
+                      <span className="course-drag-handle">☰</span>
                     </div>
-                    <span className="course-drag-handle">☰</span>
+                  ))
+                ) : (
+                  <div style={{ fontSize: "0.8rem", color: "var(--text-secondary)", fontStyle: "italic", textAlign: "center", padding: "1rem", border: "1px dashed var(--border-color)", borderRadius: "8px" }}>
+                    ไม่มีวิชาที่ระบุตัวคุณครูท่านนี้เป็นผู้สอนหลัก
                   </div>
-                ))}
+                )}
               </div>
             </div>
 
@@ -929,7 +1122,7 @@ export default function SchedulerPage() {
         {/* Supabase Connection Status Bar */}
         {isSupabaseConfigured ? (
           <div className="firebase-banner online">
-            <span>🟢 เชื่อมต่อระบบคลาวด์ Supabase (บัญชี: {currentUser?.email || "กำลังเข้าสู่ระบบ"})</span>
+            <span>🟢 เชื่อมต่อระบบคลาวด์ Supabase (คุณครู: {teachers.find(t => t.id === currentUser?.id)?.name || currentUser?.email})</span>
             <button 
               className="firebase-banner-btn" 
               onClick={handleSeedDatabase}
