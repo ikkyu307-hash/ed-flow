@@ -1000,4 +1000,109 @@
   font-weight: 900;
 }
 
+/* Grade Accordion Navigation */
+.grade-accordion {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.grade-accordion-item {
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.01);
+  overflow: hidden;
+  transition: all 0.2s ease;
+}
+
+.grade-accordion-item:hover {
+  border-color: rgba(56, 189, 248, 0.2);
+}
+
+.grade-accordion-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.75rem 1rem;
+  font-weight: 700;
+  font-size: 0.85rem;
+  color: var(--text-primary);
+  cursor: pointer;
+  background: rgba(255, 255, 255, 0.02);
+  user-select: none;
+  transition: background 0.2s ease;
+}
+
+.grade-accordion-header:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.accordion-chevron {
+  font-size: 0.65rem;
+  color: var(--text-secondary);
+  transition: transform 0.2s ease;
+}
+
+.grade-accordion-content {
+  display: flex;
+  flex-direction: column;
+  padding: 0.35rem;
+  background: rgba(0, 0, 0, 0.15);
+  gap: 0.25rem;
+  border-top: 1px solid var(--border-color);
+}
+
+.grade-sub-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+  width: 100%;
+  transition: all 0.2s ease;
+}
+
+.grade-sub-item:hover {
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-primary);
+}
+
+.grade-sub-item.active {
+  background: rgba(56, 189, 248, 0.1);
+  color: var(--accent-color);
+  font-weight: 700;
+}
+
+.dot-indicator {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-secondary);
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+}
+
+.grade-sub-item.active .dot-indicator {
+  background: var(--accent-color);
+  box-shadow: 0 0 6px var(--accent-color);
+}
+
+.no-groups-notice {
+  padding: 1rem;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  text-align: center;
+  background: rgba(255, 255, 255, 0.01);
+  border: 1px dashed var(--border-color);
+  border-radius: 8px;
+}
+
 

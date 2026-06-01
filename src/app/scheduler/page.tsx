@@ -144,6 +144,10 @@ export default function SchedulerPage() {
   // Course filter state
   const [showMyCoursesOnly, setShowMyCoursesOnly] = useState<boolean>(false);
 
+  // Group filter & accordion state
+  const [showMyGroupsOnly, setShowMyGroupsOnly] = useState<boolean>(false);
+  const [expandedGrades, setExpandedGrades] = useState<{ [key: string]: boolean }>({});
+
   // Master lists
   const [teachers, setTeachers] = useState<Teacher[]>(INITIAL_TEACHERS);
   const [classrooms, setClassrooms] = useState<Classroom[]>(INITIAL_CLASSROOMS);
@@ -364,6 +368,67 @@ export default function SchedulerPage() {
       supabase.removeChannel(groupsChannel);
     };
   }, []);
+
+  // Auto-enable "My Groups" filter if teacher has existing scheduled slots
+  useEffect(() => {
+    if (currentUser) {
+      const myId = currentUser.id || "mock-admin-id";
+      const hasAnySlots = schedules.some((s) => s.teacherId === myId);
+      if (hasAnySlots) {
+        setShowMyGroupsOnly(true);
+      }
+    }
+  }, [schedules, currentUser]);
+
+  // Adjust selected group if it gets filtered out
+  useEffect(() => {
+    const grouped = getGroupedStudentGroups();
+    const allFilteredGroups = Object.values(grouped).flat();
+    if (allFilteredGroups.length > 0 && !allFilteredGroups.some((g) => g.id === selectedGroupId)) {
+      setSelectedGroupId(allFilteredGroups[0].id);
+    }
+  }, [showMyGroupsOnly, studentGroups, schedules, currentUser]);
+
+  const getGradeGroup = (name: string): string => {
+    const matchM = name.match(/ม\s*\.\s*([1-6])/);
+    if (matchM) return `ม.${matchM[1]}`;
+
+    const matchG = name.match(/grade\s*([7-9]|1[0-2])/i) || name.match(/g\s*([7-9]|1[0-2])/i);
+    if (matchG) {
+      const gradeNum = parseInt(matchG[1]);
+      return `ม.${gradeNum - 6}`;
+    }
+
+    return "ชั้นเรียนอื่นๆ";
+  };
+
+  const getGroupedStudentGroups = () => {
+    const myId = currentUser?.id || "mock-admin-id";
+    const filtered = studentGroups.filter((g) => {
+      if (showMyGroupsOnly) {
+        return schedules.some((s) => s.studentGroupId === g.id && s.teacherId === myId);
+      }
+      return true;
+    });
+
+    const groups: { [key: string]: StudentGroup[] } = {};
+    filtered.forEach((g) => {
+      const grade = getGradeGroup(g.name);
+      if (!groups[grade]) {
+        groups[grade] = [];
+      }
+      groups[grade].push(g);
+    });
+
+    return groups;
+  };
+
+  const toggleGrade = (grade: string) => {
+    setExpandedGrades((prev) => ({
+      ...prev,
+      [grade]: prev[grade] === false ? true : false,
+    }));
+  };
 
   // Seeding Initial Data
   const handleSeedDatabase = async () => {
@@ -960,15 +1025,58 @@ export default function SchedulerPage() {
               {activeView === "group" && (
                 <>
                   <label className="sidebar-title">เลือกกลุ่มนักเรียน (Classroom)</label>
-                  <select
-                    className="select-input"
-                    value={selectedGroupId}
-                    onChange={(e) => setSelectedGroupId(e.target.value)}
-                  >
-                    {studentGroups.map((g) => (
-                      <option key={g.id} value={g.id}>{g.name}</option>
-                    ))}
-                  </select>
+                  <div style={{ display: "flex", alignItems: "center", gap: "0.4rem", margin: "0.2rem 0px 0.6rem", color: "var(--text-secondary)" }}>
+                    <input
+                      id="myGroupsFilter"
+                      type="checkbox"
+                      style={{ cursor: "pointer" }}
+                      checked={showMyGroupsOnly}
+                      onChange={(e) => setShowMyGroupsOnly(e.target.checked)}
+                    />
+                    <label htmlFor="myGroupsFilter" style={{ cursor: "pointer", fontWeight: "bold", fontSize: "0.75rem" }}>
+                      แสดงเฉพาะชั้นเรียนที่ฉันสอน 🧑‍🏫
+                    </label>
+                  </div>
+
+                  <div className="grade-accordion">
+                    {(() => {
+                      const groupedGroups = getGroupedStudentGroups();
+                      const sortedKeys = Object.keys(groupedGroups).sort();
+                      if (sortedKeys.length === 0) {
+                        return <div className="no-groups-notice">ไม่พบกลุ่มนักเรียนที่สอน</div>;
+                      }
+                      return sortedKeys.map((grade) => {
+                        const isExpanded = expandedGrades[grade] !== false;
+                        const groupList = groupedGroups[grade];
+
+                        return (
+                          <div key={grade} className="grade-accordion-item">
+                            <div 
+                              className="grade-accordion-header" 
+                              onClick={() => toggleGrade(grade)}
+                            >
+                              <span>📍 ชั้น {grade}</span>
+                              <span className="accordion-chevron">{isExpanded ? "▲" : "▼"}</span>
+                            </div>
+                            {isExpanded && (
+                              <div className="grade-accordion-content">
+                                {groupList.map((g) => (
+                                  <button
+                                    key={g.id}
+                                    className={`grade-sub-item ${selectedGroupId === g.id ? "active" : ""}`}
+                                    onClick={() => setSelectedGroupId(g.id)}
+                                  >
+                                    <span className="dot-indicator"></span>
+                                    {g.name}
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      });
+                    })()}
+                  </div>
                 </>
               )}
 
