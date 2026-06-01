@@ -1,0 +1,114 @@
+mutation CreateDemoData @transaction @auth(level: USER, insecureReason: "This operation is for seeding demo data and can be exposed to all logged in users.") {
+  user_insertMany(data: [
+    {
+      id: "a1b2c3d4-e5f6-7890-1234-567890abcdef",
+      displayName: "Alice Smith",
+      email: "alice.smith@example.com",
+      createdAt: "2023-01-15T10:00:00Z",
+      bio: "An avid learner and tech enthusiast."
+    },
+    {
+      id: "f1e2d3c4-b5a6-0987-6543-210fedcba987",
+      displayName: "Bob Johnson",
+      email: "bob.johnson@example.com",
+      createdAt: "2023-02-20T11:30:00Z",
+      bio: "Passionate about education and online courses."
+    }
+  ])
+  course_insertMany(data: [
+    {
+      id: "c0a1b2c3-d4e5-6f78-9012-34567890abcd",
+      title: "Introduction to GraphQL",
+      description: "Learn the basics of GraphQL queries and mutations.",
+      difficulty: "Beginner",
+      createdAt: "2023-03-01T09:00:00Z",
+      estimatedDuration: "4 hours",
+      imageUrl: "https://example.com/graphql.jpg"
+    },
+    {
+      id: "c4d5e6f7-8a9b-0c12-3456-7890abcdef01",
+      title: "Advanced Firebase Features",
+      description: "Dive deep into Firebase services like Cloud Firestore and Cloud Functions.",
+      difficulty: "Intermediate",
+      createdAt: "2023-03-10T14:00:00Z",
+      estimatedDuration: "8 hours",
+      imageUrl: "https://example.com/firebase.jpg"
+    }
+  ])
+  enrollment_insertMany(data: [
+    {
+      id: "e1f2g3h4-i5j6-7k8l-9m0n-1o2p3q4r5s6t",
+      userId: "a1b2c3d4-e5f6-7890-1234-567890abcdef",
+      courseId: "c0a1b2c3-d4e5-6f78-9012-34567890abcd",
+      enrollmentDate: "2023-03-05",
+      status: "In Progress",
+      createdAt: "2023-03-05T12:00:00Z"
+    },
+    {
+      id: "e7u8v9w0-x1y2-3z4a-5b6c-7d8e9f0g1h2i",
+      userId: "f1e2d3c4-b5a6-0987-6543-210fedcba987",
+      courseId: "c0a1b2c3-d4e5-6f78-9012-34567890abcd",
+      enrollmentDate: "2023-03-06",
+      status: "Completed",
+      createdAt: "2023-03-06T13:00:00Z",
+      completionDate: "2023-03-15"
+    }
+  ])
+  review_insertMany(data: [
+    {
+      id: "r1s2t3u4-v5w6-7x8y-9z0a-1b2c3d4e5f6g",
+      userId: "a1b2c3d4-e5f6-7890-1234-567890abcdef",
+      courseId: "c0a1b2c3-d4e5-6f78-9012-34567890abcd",
+      rating: 5,
+      createdAt: "2023-03-20T10:00:00Z",
+      comment: "Excellent course! Very clear explanations."
+    },
+    {
+      id: "r8h9i0j1-k2l3-4m5n-6o7p-8q9r0s1t2u3v",
+      userId: "f1e2d3c4-b5a6-0987-6543-210fedcba987",
+      courseId: "c0a1b2c3-d4e5-6f78-9012-34567890abcd",
+      rating: 4,
+      createdAt: "2023-03-22T11:00:00Z",
+      comment: "Good content, but could use more examples."
+    }
+  ])
+  module_insertMany(data: [
+    {
+      id: "m1n2o3p4-q5r6-7s8t-9u0v-1w2x3y4z5a6b",
+      courseId: "c0a1b2c3-d4e5-6f78-9012-34567890abcd",
+      title: "Module 1: GraphQL Basics",
+      orderIndex: 1,
+      createdAt: "2023-03-02T09:00:00Z",
+      description: "Introduction to GraphQL schema, types, and fields."
+    },
+    {
+      id: "m7c8d9e0-f1g2-3h4i-5j6k-7l8m9n0o1p2q",
+      courseId: "c0a1b2c3-d4e5-6f78-9012-34567890abcd",
+      title: "Module 2: Advanced Queries",
+      orderIndex: 2,
+      createdAt: "2023-03-03T10:00:00Z",
+      description: "Exploring arguments, aliases, and fragments."
+    }
+  ])
+  lesson_insertMany(data: [
+    {
+      id: "l1e2s3s4-o5n6-7p8q-9r0s-1t2u3v4w5x6y",
+      moduleId: "m1n2o3p4-q5r6-7s8t-9u0v-1w2x3y4z5a6b",
+      title: "Lesson 1.1: What is GraphQL?",
+      content: "An overview of GraphQL's benefits and core concepts.",
+      orderIndex: 1,
+      lessonType: "Video",
+      createdAt: "2023-03-02T09:30:00Z",
+      videoUrl: "https://example.com/video1.mp4"
+    },
+    {
+      id: "l7z8a9b0-c1d2-3e4f-5g6h-7i8j9k0l1m2n",
+      moduleId: "m1n2o3p4-q5r6-7s8t-9u0v-1w2x3y4z5a6b",
+      title: "Lesson 1.2: Your First Query",
+      content: "Hands-on exercise to write and execute a basic GraphQL query.",
+      orderIndex: 2,
+      lessonType: "Text",
+      createdAt: "2023-03-02T10:30:00Z"
+    }
+  ])
+}

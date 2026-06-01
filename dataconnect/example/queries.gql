@@ -1,0 +1,49 @@
+mutation CreateCourse($title: String!, $description: String!, $difficulty: String!, $estimatedDuration: String, $imageUrl: String) @auth(level: USER, insecureReason: "New courses can be created by any logged-in user.") {
+  course_insert(data: {
+    title: $title,
+    description: $description,
+    difficulty: $difficulty,
+    estimatedDuration: $estimatedDuration,
+    imageUrl: $imageUrl,
+    createdAt: { expr: "request.time" }
+  }) {
+    id
+  }
+}
+
+query ListCourses($limit: Int = 100, $offset: Int = 0) @auth(level: PUBLIC, insecureReason: "Course listings are publicly available.") {
+  courses(limit: $limit, offset: $offset) {
+    id
+    title
+    description
+    difficulty
+    estimatedDuration
+    imageUrl
+    createdAt
+  }
+}
+
+mutation EnrollInCourse($courseId: UUID!) @auth(level: USER) {
+  enrollment_insert(data: {
+    courseId: $courseId,
+    userId_expr: "auth.uid",
+    enrollmentDate: { expr: "request.time" },
+    status: "ENROLLED",
+    createdAt: { expr: "request.time" }
+  }) {
+    id
+  }
+}
+
+query GetMyEnrollments @auth(level: USER) {
+  enrollments(where: { userId: { eq_expr: "auth.uid" } }) {
+    id
+    enrollmentDate
+    status
+    course {
+      id
+      title
+      difficulty
+    }
+  }
+}
