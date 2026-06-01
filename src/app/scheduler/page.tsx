@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from "react";
 import "./scheduler.css";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
+import { useRouter } from "next/navigation";
 
 // Interface Definitions
 interface Teacher {
@@ -38,7 +39,7 @@ interface ScheduleSlot {
   classroomId: string;
   studentGroupId: string;
   dayOfWeek: number; // 1 = Monday, ..., 5 = Friday
-  period: number; // 1 to 8 (excluding lunch)
+  period: number; // 1 to 8
 }
 
 interface ConflictDetail {
@@ -47,8 +48,8 @@ interface ConflictDetail {
   conflictingSlotId: string;
 }
 
-// Local Mock Data (for fallback offline mode)
-const MOCK_TEACHERS: Teacher[] = [
+// Local Mock Data (fallbacks)
+const INITIAL_TEACHERS: Teacher[] = [
   { id: "t1", name: "ครูสมชาย รักเรียน", subject: "คณิตศาสตร์" },
   { id: "t2", name: "ครูสมศรี แสนดี", subject: "วิทยาศาสตร์" },
   { id: "t3", name: "ครูทิพย์วรรณ สอนดี", subject: "ภาษาอังกฤษ" },
@@ -56,7 +57,7 @@ const MOCK_TEACHERS: Teacher[] = [
   { id: "t5", name: "ครูวิชัย พงษ์เพชร", subject: "สังคมศึกษา" },
 ];
 
-const MOCK_CLASSROOMS: Classroom[] = [
+const INITIAL_CLASSROOMS: Classroom[] = [
   { id: "r1", name: "ห้อง 101", type: "ห้องเรียนทั่วไป" },
   { id: "r2", name: "ห้อง 102", type: "ห้องเรียนทั่วไป" },
   { id: "r3", name: "ห้องวิทย์ Lab 1", type: "ห้องทดลองวิทยาศาสตร์" },
@@ -64,7 +65,7 @@ const MOCK_CLASSROOMS: Classroom[] = [
   { id: "r5", name: "ห้องคอม 3", type: "ห้องคอมพิวเตอร์" },
 ];
 
-const MOCK_COURSES: Course[] = [
+const INITIAL_COURSES: Course[] = [
   { id: "c1", name: "คณิตศาสตร์พื้นฐาน", code: "ค21101", color: "rgba(56, 189, 248, 0.15)", defaultTeacherId: "t1", defaultClassroomId: "r1" },
   { id: "c2", name: "วิทยาศาสตร์ทั่วไป", code: "ว21101", color: "rgba(192, 132, 252, 0.15)", defaultTeacherId: "t2", defaultClassroomId: "r3" },
   { id: "c3", name: "ภาษาอังกฤษพื้นฐาน", code: "อ21101", color: "rgba(52, 211, 153, 0.15)", defaultTeacherId: "t3", defaultClassroomId: "r4" },
@@ -73,7 +74,7 @@ const MOCK_COURSES: Course[] = [
   { id: "c6", name: "เทคโนโลยีสารสนเทศ", code: "ว21103", color: "rgba(6, 182, 212, 0.15)", defaultTeacherId: "t1", defaultClassroomId: "r5" },
 ];
 
-const MOCK_STUDENT_GROUPS: StudentGroup[] = [
+const INITIAL_STUDENT_GROUPS: StudentGroup[] = [
   { id: "g1", name: "ชั้น ม.1/1 (Grade 7/1)" },
   { id: "g2", name: "ชั้น ม.1/2 (Grade 7/2)" },
   { id: "g3", name: "ชั้น ม.2/1 (Grade 8/1)" },
@@ -109,14 +110,20 @@ const PERIOD_TIMES = [
 ];
 
 export default function SchedulerPage() {
-  // Master lists in state (fallbacks to mocks if not connected)
-  const [teachers, setTeachers] = useState<Teacher[]>(MOCK_TEACHERS);
-  const [classrooms, setClassrooms] = useState<Classroom[]>(MOCK_CLASSROOMS);
-  const [courses, setCourses] = useState<Course[]>(MOCK_COURSES);
-  const [studentGroups, setStudentGroups] = useState<StudentGroup[]>(MOCK_STUDENT_GROUPS);
+  const router = useRouter();
+  const [currentUser, setCurrentUser] = useState<any>(null);
+  const [authLoading, setAuthLoading] = useState(true);
+
+  // Master lists
+  const [teachers, setTeachers] = useState<Teacher[]>(INITIAL_TEACHERS);
+  const [classrooms, setClassrooms] = useState<Classroom[]>(INITIAL_CLASSROOMS);
+  const [courses, setCourses] = useState<Course[]>(INITIAL_COURSES);
+  const [studentGroups, setStudentGroups] = useState<StudentGroup[]>(INITIAL_STUDENT_GROUPS);
   const [schedules, setSchedules] = useState<ScheduleSlot[]>(INITIAL_SCHEDULES);
 
   const [activeView, setActiveView] = useState<"group" | "teacher" | "room">("group");
+  const [isSettingsMode, setIsSettingsMode] = useState<boolean>(false);
+  const [activeSettingsTab, setActiveSettingsTab] = useState<"teachers" | "courses" | "rooms" | "groups">("teachers");
   
   // Filters
   const [selectedGroupId, setSelectedGroupId] = useState<string>("g1");
@@ -144,15 +151,42 @@ export default function SchedulerPage() {
     slotIdToUpdate?: string;
   } | null>(null);
 
-  // Toggle Theme
+  // School Settings CRUD inputs
+  const [teacherName, setTeacherName] = useState("");
+  const [teacherSubject, setTeacherSubject] = useState("");
+  
+  const [roomName, setRoomName] = useState("");
+  const [roomType, setRoomType] = useState("ห้องเรียนทั่วไป");
+
+  const [courseCode, setCourseCode] = useState("");
+  const [courseName, setCourseName] = useState("");
+  const [courseColor, setCourseColor] = useState("rgba(56, 189, 248, 0.15)");
+  const [courseTeacherId, setCourseTeacherId] = useState("");
+  const [courseRoomId, setCourseRoomId] = useState("");
+
+  const [groupName, setGroupName] = useState("");
+
+  // Check authentication
   useEffect(() => {
-    const root = document.documentElement;
-    if (isDarkMode) {
-      root.classList.remove("light-theme");
-    } else {
-      root.classList.add("light-theme");
+    if (!isSupabaseConfigured || !supabase) {
+      setAuthLoading(false);
+      // Simulating a mock local user
+      setCurrentUser({ email: "offline-admin@school.ac.th", user_metadata: { full_name: "ครูแอดมินระบบจำลอง" } });
+      return;
     }
-  }, [isDarkMode]);
+
+    const checkUser = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        router.push("/login");
+      } else {
+        setCurrentUser(user);
+        setAuthLoading(false);
+      }
+    };
+
+    checkUser();
+  }, [router]);
 
   // Fetch initial data from Supabase
   const fetchInitialData = async () => {
@@ -160,10 +194,10 @@ export default function SchedulerPage() {
 
     try {
       const [tRes, cRes, coRes, gRes, sRes] = await Promise.all([
-        supabase.from("teachers").select("*"),
-        supabase.from("classrooms").select("*"),
-        supabase.from("courses").select("*"),
-        supabase.from("student_groups").select("*"),
+        supabase.from("teachers").select("*").order("name"),
+        supabase.from("classrooms").select("*").order("name"),
+        supabase.from("courses").select("*").order("name"),
+        supabase.from("student_groups").select("*").order("name"),
         supabase.from("schedules").select("*"),
       ]);
 
@@ -171,27 +205,25 @@ export default function SchedulerPage() {
       if (cRes.data && cRes.data.length > 0) setClassrooms(cRes.data as Classroom[]);
       
       if (coRes.data && coRes.data.length > 0) {
-        const mappedCourses: Course[] = coRes.data.map((co: any) => ({
+        setCourses(coRes.data.map((co: any) => ({
           id: co.id,
           code: co.code,
           name: co.name,
           color: co.color,
           defaultTeacherId: co.default_teacher_id,
           defaultClassroomId: co.default_classroom_id,
-        }));
-        setCourses(mappedCourses);
+        })));
       }
 
       if (gRes.data && gRes.data.length > 0) {
-        const mappedGroups: StudentGroup[] = gRes.data.map((g: any) => ({
+        setStudentGroups(gRes.data.map((g: any) => ({
           id: g.id,
           name: g.name,
-        }));
-        setStudentGroups(mappedGroups);
+        })));
       }
 
       if (sRes.data) {
-        const mappedSchedules: ScheduleSlot[] = sRes.data.map((s: any) => ({
+        setSchedules(sRes.data.map((s: any) => ({
           id: s.id,
           courseId: s.course_id,
           teacherId: s.teacher_id,
@@ -199,8 +231,7 @@ export default function SchedulerPage() {
           studentGroupId: s.student_group_id,
           dayOfWeek: s.day_of_week,
           period: s.period,
-        }));
-        setSchedules(mappedSchedules);
+        })));
       }
     } catch (err) {
       console.error("Error fetching initial Supabase data:", err);
@@ -209,15 +240,10 @@ export default function SchedulerPage() {
 
   // Supabase Real-time Synchronization
   useEffect(() => {
-    if (!isSupabaseConfigured || !supabase) {
-      console.log("Supabase is offline. Using local memory storage.");
-      return;
-    }
+    if (!isSupabaseConfigured || !supabase) return;
 
-    console.log("Supabase is online. Loading data and subscribing to realtime...");
     fetchInitialData();
 
-    // Map DB schema columns to camelCase JS state
     const mapSlot = (item: any): ScheduleSlot => ({
       id: item.id,
       courseId: item.course_id,
@@ -228,62 +254,73 @@ export default function SchedulerPage() {
       period: item.period,
     });
 
-    // Realtime channel listener for postgres changes on schedules table
-    const channel = supabase
-      .channel("schedules-realtime")
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "schedules" },
-        (payload: any) => {
-          console.log("Real-time database payload received:", payload);
-          if (payload.eventType === "INSERT") {
-            setSchedules((prev) => {
-              if (prev.some((s) => s.id === payload.new.id)) return prev;
-              return [...prev, mapSlot(payload.new)];
-            });
-          } else if (payload.eventType === "UPDATE") {
-            setSchedules((prev) =>
-              prev.map((s) => (s.id === payload.new.id ? mapSlot(payload.new) : s))
-            );
-          } else if (payload.eventType === "DELETE") {
-            setSchedules((prev) => prev.filter((s) => s.id !== payload.old.id));
-          }
+    // Subscriptions
+    const schedulesChannel = supabase
+      .channel("schedules-channel")
+      .on("postgres_changes", { event: "*", schema: "public", table: "schedules" }, (payload: any) => {
+        if (payload.eventType === "INSERT") {
+          setSchedules((prev) => prev.some((s) => s.id === payload.new.id) ? prev : [...prev, mapSlot(payload.new)]);
+        } else if (payload.eventType === "UPDATE") {
+          setSchedules((prev) => prev.map((s) => (s.id === payload.new.id ? mapSlot(payload.new) : s)));
+        } else if (payload.eventType === "DELETE") {
+          setSchedules((prev) => prev.filter((s) => s.id !== payload.old.id));
         }
-      )
+      })
+      .subscribe();
+
+    const teachersChannel = supabase
+      .channel("teachers-channel")
+      .on("postgres_changes", { event: "*", schema: "public", table: "teachers" }, () => fetchInitialData())
+      .subscribe();
+
+    const classroomsChannel = supabase
+      .channel("classrooms-channel")
+      .on("postgres_changes", { event: "*", schema: "public", table: "classrooms" }, () => fetchInitialData())
+      .subscribe();
+
+    const coursesChannel = supabase
+      .channel("courses-channel")
+      .on("postgres_changes", { event: "*", schema: "public", table: "courses" }, () => fetchInitialData())
+      .subscribe();
+
+    const groupsChannel = supabase
+      .channel("groups-channel")
+      .on("postgres_changes", { event: "*", schema: "public", table: "student_groups" }, () => fetchInitialData())
       .subscribe();
 
     return () => {
-      supabase.removeChannel(channel);
+      supabase.removeChannel(schedulesChannel);
+      supabase.removeChannel(teachersChannel);
+      supabase.removeChannel(classroomsChannel);
+      supabase.removeChannel(coursesChannel);
+      supabase.removeChannel(groupsChannel);
     };
   }, []);
 
-  // Database Seeding Trigger (For fresh Supabase DB setup)
+  // Theme Toggle Effect
+  useEffect(() => {
+    const root = document.documentElement;
+    if (isDarkMode) {
+      root.classList.remove("light-theme");
+    } else {
+      root.classList.add("light-theme");
+    }
+  }, [isDarkMode]);
+
+  // Seeding Initial Data
   const handleSeedDatabase = async () => {
     if (!isSupabaseConfigured || !supabase) return;
     
     setIsSeeding(true);
     try {
-      // 1. Seed Teachers
       await supabase.from("teachers").upsert(
-        MOCK_TEACHERS.map((t) => ({
-          id: t.id,
-          name: t.name,
-          subject: t.subject,
-        }))
+        INITIAL_TEACHERS.map((t) => ({ id: t.id, name: t.name, subject: t.subject }))
       );
-
-      // 2. Seed Classrooms
       await supabase.from("classrooms").upsert(
-        MOCK_CLASSROOMS.map((r) => ({
-          id: r.id,
-          name: r.name,
-          type: r.type,
-        }))
+        INITIAL_CLASSROOMS.map((r) => ({ id: r.id, name: r.name, type: r.type }))
       );
-
-      // 3. Seed Courses
       await supabase.from("courses").upsert(
-        MOCK_COURSES.map((c) => ({
+        INITIAL_COURSES.map((c) => ({
           id: c.id,
           code: c.code,
           name: c.name,
@@ -292,16 +329,9 @@ export default function SchedulerPage() {
           default_classroom_id: c.defaultClassroomId,
         }))
       );
-
-      // 4. Seed Student Groups
       await supabase.from("student_groups").upsert(
-        MOCK_STUDENT_GROUPS.map((g) => ({
-          id: g.id,
-          name: g.name,
-        }))
+        INITIAL_STUDENT_GROUPS.map((g) => ({ id: g.id, name: g.name }))
       );
-
-      // 5. Seed Schedules
       await supabase.from("schedules").upsert(
         INITIAL_SCHEDULES.map((s) => ({
           id: s.id,
@@ -314,13 +344,166 @@ export default function SchedulerPage() {
         }))
       );
       
-      alert("จัดส่งข้อมูลตั้งต้นครู วิชา และตารางสอนจำลองขึ้น Supabase Database สำเร็จแล้ว!");
+      alert("นำเข้าข้อมูลวิชาและครูตั้งต้นขึ้นสู่ Supabase สำเร็จแล้ว!");
       await fetchInitialData();
-    } catch (err) {
+    } catch (err: any) {
       console.error("Seeding error:", err);
-      alert("เกิดข้อผิดพลาดในการนำเข้าข้อมูล: " + (err as Error).message);
+      alert("เกิดข้อผิดพลาด: " + err.message);
     } finally {
       setIsSeeding(false);
+    }
+  };
+
+  // Sign out
+  const handleSignOut = async () => {
+    if (confirm("ต้องการออกจากระบบเข้าสู่หน้าหลัก?")) {
+      if (isSupabaseConfigured && supabase) {
+        await supabase.auth.signOut();
+      }
+      router.push("/login");
+    }
+  };
+
+  // Timetable Print Command
+  const handlePrint = () => {
+    window.print();
+  };
+
+  // Settings CRUD - Add Teacher
+  const handleAddTeacher = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!teacherName || !teacherSubject) return;
+
+    const newId = `t-${Date.now()}`;
+    const newT = { id: newId, name: teacherName, subject: teacherSubject };
+
+    if (isSupabaseConfigured && supabase) {
+      const { error } = await supabase.from("teachers").insert([newT]);
+      if (error) alert("ล้มเหลว: " + error.message);
+    } else {
+      setTeachers((prev) => [...prev, newT]);
+    }
+    setTeacherName("");
+    setTeacherSubject("");
+  };
+
+  // Settings CRUD - Delete Teacher
+  const handleDeleteTeacher = async (id: string) => {
+    if (!confirm("ลบคุณครูรายนี้จากระบบ? (วิชาและตารางสอนที่ผูกจะหลุดออก)")) return;
+
+    if (isSupabaseConfigured && supabase) {
+      const { error } = await supabase.from("teachers").delete().eq("id", id);
+      if (error) alert("ล้มเหลว: " + error.message);
+    } else {
+      setTeachers((prev) => prev.filter((t) => t.id !== id));
+      setSchedules((prev) => prev.filter((s) => s.teacherId !== id));
+    }
+  };
+
+  // Settings CRUD - Add Classroom
+  const handleAddClassroom = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!roomName) return;
+
+    const newId = `r-${Date.now()}`;
+    const newR = { id: newId, name: roomName, type: roomType };
+
+    if (isSupabaseConfigured && supabase) {
+      const { error } = await supabase.from("classrooms").insert([newR]);
+      if (error) alert("ล้มเหลว: " + error.message);
+    } else {
+      setClassrooms((prev) => [...prev, newR]);
+    }
+    setRoomName("");
+  };
+
+  // Settings CRUD - Delete Classroom
+  const handleDeleteClassroom = async (id: string) => {
+    if (!confirm("ลบห้องเรียนนี้ออกจากระบบ?")) return;
+
+    if (isSupabaseConfigured && supabase) {
+      const { error } = await supabase.from("classrooms").delete().eq("id", id);
+      if (error) alert("ล้มเหลว: " + error.message);
+    } else {
+      setClassrooms((prev) => prev.filter((r) => r.id !== id));
+      setSchedules((prev) => prev.filter((s) => s.classroomId !== id));
+    }
+  };
+
+  // Settings CRUD - Add Course
+  const handleAddCourse = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!courseCode || !courseName) return;
+
+    const newId = `c-${Date.now()}`;
+    const newC = {
+      id: newId,
+      code: courseCode,
+      name: courseName,
+      color: courseColor,
+      defaultTeacherId: courseTeacherId,
+      defaultClassroomId: courseRoomId,
+    };
+
+    if (isSupabaseConfigured && supabase) {
+      const { error } = await supabase.from("courses").insert([{
+        id: newId,
+        code: courseCode,
+        name: courseName,
+        color: courseColor,
+        default_teacher_id: courseTeacherId || null,
+        default_classroom_id: courseRoomId || null,
+      }]);
+      if (error) alert("ล้มเหลว: " + error.message);
+    } else {
+      setCourses((prev) => [...prev, newC]);
+    }
+    setCourseCode("");
+    setCourseName("");
+    setCourseTeacherId("");
+    setCourseRoomId("");
+  };
+
+  // Settings CRUD - Delete Course
+  const handleDeleteCourse = async (id: string) => {
+    if (!confirm("ต้องการลบวิชานี้ออกจากระบบ?")) return;
+
+    if (isSupabaseConfigured && supabase) {
+      const { error } = await supabase.from("courses").delete().eq("id", id);
+      if (error) alert("ล้มเหลว: " + error.message);
+    } else {
+      setCourses((prev) => prev.filter((c) => c.id !== id));
+      setSchedules((prev) => prev.filter((s) => s.courseId !== id));
+    }
+  };
+
+  // Settings CRUD - Add Student Group
+  const handleAddGroup = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!groupName) return;
+
+    const newId = `g-${Date.now()}`;
+    const newG = { id: newId, name: groupName };
+
+    if (isSupabaseConfigured && supabase) {
+      const { error } = await supabase.from("student_groups").insert([newG]);
+      if (error) alert("ล้มเหลว: " + error.message);
+    } else {
+      setStudentGroups((prev) => [...prev, newG]);
+    }
+    setGroupName("");
+  };
+
+  // Settings CRUD - Delete Group
+  const handleDeleteGroup = async (id: string) => {
+    if (!confirm("ต้องการลบชั้นเรียนนี้ออกจากระบบ? (ตารางของชั้นเรียนทั้งหมดจะถูกลบด้วย)")) return;
+
+    if (isSupabaseConfigured && supabase) {
+      const { error } = await supabase.from("student_groups").delete().eq("id", id);
+      if (error) alert("ล้มเหลว: " + error.message);
+    } else {
+      setStudentGroups((prev) => prev.filter((g) => g.id !== id));
+      setSchedules((prev) => prev.filter((s) => s.studentGroupId !== id));
     }
   };
 
@@ -360,7 +543,7 @@ export default function SchedulerPage() {
     return conflicts;
   };
 
-  // Drag Handlers
+  // Drag and Drop handlers
   const handleDragStart = (e: React.DragEvent, courseId: string) => {
     setDraggedCourseId(courseId);
     setDraggedSlotId(null);
@@ -424,7 +607,7 @@ export default function SchedulerPage() {
     setIsModalOpen(true);
   };
 
-  // Save / Update Schedule Slot (Handles both Supabase & Offline local states)
+  // Save Assignment
   const handleSaveAssignment = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!modalData) return;
@@ -454,16 +637,12 @@ export default function SchedulerPage() {
           period: period,
         });
         if (error) throw error;
-      } catch (err) {
-        console.error("Supabase save error:", err);
-        alert("ไม่สามารถบันทึกไปยัง Supabase ได้: " + (err as Error).message);
+      } catch (err: any) {
+        alert("ไม่สามารถบันทึกได้: " + err.message);
       }
     } else {
-      // Local State edit (Offline Mode)
       if (slotIdToUpdate) {
-        setSchedules((prev) =>
-          prev.map((s) => (s.id === slotIdToUpdate ? newSlot : s))
-        );
+        setSchedules((prev) => prev.map((s) => (s.id === slotIdToUpdate ? newSlot : s)));
       } else {
         setSchedules((prev) => [...prev, newSlot]);
       }
@@ -483,35 +662,32 @@ export default function SchedulerPage() {
       try {
         const { error } = await supabase.from("schedules").delete().eq("id", slotId);
         if (error) throw error;
-      } catch (err) {
-        console.error("Supabase delete error:", err);
-        alert("ไม่สามารถลบข้อมูลจาก Supabase ได้: " + (err as Error).message);
+      } catch (err: any) {
+        alert("ล้มเหลว: " + err.message);
       }
     } else {
       setSchedules((prev) => prev.filter((s) => s.id !== slotId));
     }
   };
 
-  // Clear all schedules in view
+  // Clear all
   const handleClearAllSchedules = async () => {
     if (!confirm("คุณต้องการล้างข้อมูลตารางเรียนทั้งหมดใช่หรือไม่?")) return;
 
     if (isSupabaseConfigured && supabase) {
       try {
-        // Delete all rows in schedules table
         const { error } = await supabase.from("schedules").delete().neq("id", "0");
         if (error) throw error;
         setSchedules([]);
-      } catch (err) {
-        console.error("Supabase clear error:", err);
-        alert("ไม่สามารถล้างข้อมูลใน Supabase ได้: " + (err as Error).message);
+      } catch (err: any) {
+        alert("ล้มเหลว: " + err.message);
       }
     } else {
       setSchedules([]);
     }
   };
 
-  // Filter slots to display in current grid view
+  // Filter active schedules
   const getFilteredSchedules = () => {
     if (activeView === "group") {
       return schedules.filter((s) => s.studentGroupId === selectedGroupId);
@@ -524,13 +700,22 @@ export default function SchedulerPage() {
 
   const visibleSchedules = getFilteredSchedules();
   
-  // Find all active conflicts in the entire system for sidebar display
+  // Active conflicts list
   const allConflictsList = schedules
-    .map((s) => {
-      const confs = getConflictsForSlot(s);
-      return { slot: s, conflicts: confs };
-    })
+    .map((s) => ({ slot: s, conflicts: getConflictsForSlot(s) }))
     .filter((item) => item.conflicts.length > 0);
+
+  // Authentication Loading screen
+  if (authLoading) {
+    return (
+      <div className="scheduler-container" style={{ justifyContent: "center", alignItems: "center" }}>
+        <div style={{ textAlign: "center" }}>
+          <div className="logo-icon" style={{ margin: "0 auto 1.5rem", width: "64px", height: "64px", fontSize: "1.75rem", animation: "pulseHazard 2s infinite" }}>EF</div>
+          <h2>กำลังยืนยันสิทธิ์เข้าใช้ระบบวิชาการ...</h2>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="scheduler-container">
@@ -541,111 +726,179 @@ export default function SchedulerPage() {
           <div className="logo-text">ed-flow Scheduler</div>
         </div>
 
-        {/* View Specific Options */}
-        <div className="sidebar-section">
-          {activeView === "group" && (
-            <>
-              <label className="sidebar-title">เลือกกลุ่มนักเรียน (Classroom)</label>
-              <select
-                className="select-input"
-                value={selectedGroupId}
-                onChange={(e) => setSelectedGroupId(e.target.value)}
-              >
-                {studentGroups.map((g) => (
-                  <option key={g.id} value={g.id}>
-                    {g.name}
-                  </option>
-                ))}
-              </select>
-            </>
-          )}
+        {/* View Controls & Settings Navigation */}
+        {!isSettingsMode ? (
+          <>
+            <div className="sidebar-section">
+              {activeView === "group" && (
+                <>
+                  <label className="sidebar-title">เลือกกลุ่มนักเรียน (Classroom)</label>
+                  <select
+                    className="select-input"
+                    value={selectedGroupId}
+                    onChange={(e) => setSelectedGroupId(e.target.value)}
+                  >
+                    {studentGroups.map((g) => (
+                      <option key={g.id} value={g.id}>{g.name}</option>
+                    ))}
+                  </select>
+                </>
+              )}
 
-          {activeView === "teacher" && (
-            <>
-              <label className="sidebar-title">เลือกครูผู้สอน (Teacher)</label>
-              <select
-                className="select-input"
-                value={selectedTeacherId}
-                onChange={(e) => setSelectedTeacherId(e.target.value)}
-              >
-                {teachers.map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t.name} ({t.subject})
-                  </option>
-                ))}
-              </select>
-              
-              <label className="sidebar-title" style={{ marginTop: "0.5rem" }}>
-                วางข้อมูลเข้าตารางสำหรับกลุ่มเรียน:
-              </label>
-              <select
-                className="select-input"
-                value={selectedGroupId}
-                onChange={(e) => setSelectedGroupId(e.target.value)}
-              >
-                {studentGroups.map((g) => (
-                  <option key={g.id} value={g.id}>
-                    {g.name}
-                  </option>
-                ))}
-              </select>
-            </>
-          )}
+              {activeView === "teacher" && (
+                <>
+                  <label className="sidebar-title">เลือกครูผู้สอน (Teacher)</label>
+                  <select
+                    className="select-input"
+                    value={selectedTeacherId}
+                    onChange={(e) => setSelectedTeacherId(e.target.value)}
+                  >
+                    {teachers.map((t) => (
+                      <option key={t.id} value={t.id}>{t.name} ({t.subject})</option>
+                    ))}
+                  </select>
+                  
+                  <label className="sidebar-title" style={{ marginTop: "0.5rem" }}>
+                    จัดตารางให้กลุ่มเรียน:
+                  </label>
+                  <select
+                    className="select-input"
+                    value={selectedGroupId}
+                    onChange={(e) => setSelectedGroupId(e.target.value)}
+                  >
+                    {studentGroups.map((g) => (
+                      <option key={g.id} value={g.id}>{g.name}</option>
+                    ))}
+                  </select>
+                </>
+              )}
 
-          {activeView === "room" && (
-            <>
-              <label className="sidebar-title">เลือกห้องเรียน (Room)</label>
-              <select
-                className="select-input"
-                value={selectedRoomId}
-                onChange={(e) => setSelectedRoomId(e.target.value)}
-              >
-                {classrooms.map((r) => (
-                  <option key={r.id} value={r.id}>
-                    {r.name} ({r.type})
-                  </option>
-                ))}
-              </select>
+              {activeView === "room" && (
+                <>
+                  <label className="sidebar-title">เลือกห้องเรียน (Room)</label>
+                  <select
+                    className="select-input"
+                    value={selectedRoomId}
+                    onChange={(e) => setSelectedRoomId(e.target.value)}
+                  >
+                    {classrooms.map((r) => (
+                      <option key={r.id} value={r.id}>{r.name} ({r.type})</option>
+                    ))}
+                  </select>
 
-              <label className="sidebar-title" style={{ marginTop: "0.5rem" }}>
-                วางข้อมูลเข้าตารางสำหรับกลุ่มเรียน:
-              </label>
-              <select
-                className="select-input"
-                value={selectedGroupId}
-                onChange={(e) => setSelectedGroupId(e.target.value)}
-              >
-                {studentGroups.map((g) => (
-                  <option key={g.id} value={g.id}>
-                    {g.name}
-                  </option>
-                ))}
-              </select>
-            </>
-          )}
-        </div>
+                  <label className="sidebar-title" style={{ marginTop: "0.5rem" }}>
+                    จัดตารางให้กลุ่มเรียน:
+                  </label>
+                  <select
+                    className="select-input"
+                    value={selectedGroupId}
+                    onChange={(e) => setSelectedGroupId(e.target.value)}
+                  >
+                    {studentGroups.map((g) => (
+                      <option key={g.id} value={g.id}>{g.name}</option>
+                    ))}
+                  </select>
+                </>
+              )}
+            </div>
 
-        {/* Draggable Subjects */}
-        <div className="sidebar-section" style={{ flexGrow: 1 }}>
-          <label className="sidebar-title">วิชาเรียน (Drag to Timetable)</label>
-          <div className="draggable-list">
-            {courses.map((course) => (
-              <div
-                key={course.id}
-                className="draggable-item"
-                draggable
-                onDragStart={(e) => handleDragStart(e, course.id)}
-                onDragEnd={handleDragEnd}
-              >
-                <div className="course-info">
-                  <span className="course-name">{course.name}</span>
-                  <span className="course-code">{course.code}</span>
-                </div>
-                <span className="course-drag-handle">☰</span>
+            {/* Draggable Subjects */}
+            <div className="sidebar-section" style={{ flexGrow: 1 }}>
+              <label className="sidebar-title">วิชาเรียน (Drag to Timetable)</label>
+              <div className="draggable-list">
+                {courses.map((course) => (
+                  <div
+                    key={course.id}
+                    className="draggable-item"
+                    draggable
+                    onDragStart={(e) => handleDragStart(e, course.id)}
+                    onDragEnd={handleDragEnd}
+                  >
+                    <div className="course-info">
+                      <span className="course-name">{course.name}</span>
+                      <span className="course-code">{course.code}</span>
+                    </div>
+                    <span className="course-drag-handle">☰</span>
+                  </div>
+                ))}
               </div>
-            ))}
+            </div>
+
+            {/* Teacher Workload Statistics tracker */}
+            <div className="sidebar-section">
+              <label className="sidebar-title">ภาระชั่วโมงสอนครู (สัปดาห์นี้)</label>
+              <div className="workload-tracker">
+                {teachers.slice(0, 4).map((t) => {
+                  const assignedCount = schedules.filter((s) => s.teacherId === t.id).length;
+                  const targetLoad = 12; // Standard workload goal
+                  const pct = Math.min((assignedCount / targetLoad) * 100, 100);
+                  
+                  let stateClass = "normal";
+                  if (assignedCount >= targetLoad) stateClass = "danger";
+                  else if (assignedCount >= targetLoad - 3) stateClass = "warning";
+
+                  return (
+                    <div className="workload-item" key={t.id}>
+                      <div className="workload-header-info">
+                        <span className="workload-name">{t.name.split(" ")[0]}</span>
+                        <span className="workload-count">{assignedCount} / {targetLoad} คาบ</span>
+                      </div>
+                      <div className="workload-bar-bg">
+                        <div 
+                          className={`workload-bar-fill ${stateClass}`} 
+                          style={{ width: `${pct}%` }}
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </>
+        ) : (
+          /* Sidebar Settings Navigation Toggles */
+          <div className="sidebar-section" style={{ flexGrow: 1 }}>
+            <label className="sidebar-title">จัดการข้อมูลโรงเรียน</label>
+            <div className="draggable-list" style={{ marginTop: "0.5rem" }}>
+              <button 
+                className={`view-btn ${activeSettingsTab === "teachers" ? "active" : ""}`} 
+                onClick={() => setActiveSettingsTab("teachers")}
+                style={{ width: "100%", justifyContent: "flex-start", display: "flex", padding: "0.75rem 1rem", border: "1px solid var(--border-color)", borderRadius: "8px", background: activeSettingsTab === "teachers" ? "var(--accent-color)" : "var(--bg-card)", color: activeSettingsTab === "teachers" ? "#fff" : "var(--text-primary)" }}
+              >
+                👤 จัดการคุณครู ({teachers.length})
+              </button>
+              <button 
+                className={`view-btn ${activeSettingsTab === "courses" ? "active" : ""}`} 
+                onClick={() => setActiveSettingsTab("courses")}
+                style={{ width: "100%", justifyContent: "flex-start", display: "flex", padding: "0.75rem 1rem", border: "1px solid var(--border-color)", borderRadius: "8px", background: activeSettingsTab === "courses" ? "var(--accent-color)" : "var(--bg-card)", color: activeSettingsTab === "courses" ? "#fff" : "var(--text-primary)" }}
+              >
+                📚 จัดการวิชาเรียน ({courses.length})
+              </button>
+              <button 
+                className={`view-btn ${activeSettingsTab === "rooms" ? "active" : ""}`} 
+                onClick={() => setActiveSettingsTab("rooms")}
+                style={{ width: "100%", justifyContent: "flex-start", display: "flex", padding: "0.75rem 1rem", border: "1px solid var(--border-color)", borderRadius: "8px", background: activeSettingsTab === "rooms" ? "var(--accent-color)" : "var(--bg-card)", color: activeSettingsTab === "rooms" ? "#fff" : "var(--text-primary)" }}
+              >
+                🏫 จัดการห้องเรียน ({classrooms.length})
+              </button>
+              <button 
+                className={`view-btn ${activeSettingsTab === "groups" ? "active" : ""}`} 
+                onClick={() => setActiveSettingsTab("groups")}
+                style={{ width: "100%", justifyContent: "flex-start", display: "flex", padding: "0.75rem 1rem", border: "1px solid var(--border-color)", borderRadius: "8px", background: activeSettingsTab === "groups" ? "var(--accent-color)" : "var(--bg-card)", color: activeSettingsTab === "groups" ? "#fff" : "var(--text-primary)" }}
+              >
+                👥 จัดการชั้นเรียน/ห้อง ({studentGroups.length})
+              </button>
+            </div>
+            
+            <button 
+              className="secondary-btn" 
+              onClick={() => setIsSettingsMode(false)}
+              style={{ marginTop: "auto", display: "block", textAlign: "center" }}
+            >
+              ← กลับไปจัดตารางเรียน
+            </button>
           </div>
-        </div>
+        )}
 
         {/* Sidebar Conflict Alerting Panel */}
         {allConflictsList.length > 0 && (
@@ -660,12 +913,9 @@ export default function SchedulerPage() {
               
               return (
                 <div key={idx} className="conflict-sidebar-item">
-                  <span className="conflict-sidebar-item-desc">
-                    {course?.name} ({group?.name})
-                  </span>
+                  <span className="conflict-sidebar-item-desc">{course?.name} ({group?.name})</span>
                   <span className="conflict-sidebar-item-meta">
-                    {dayObj?.name} คาบที่ {item.slot.period} -{" "}
-                    {item.conflicts.map((c) => c.message).join(", ")}
+                    {dayObj?.name} คาบที่ {item.slot.period} - {item.conflicts.map((c) => c.message).join(", ")}
                   </span>
                 </div>
               );
@@ -676,51 +926,33 @@ export default function SchedulerPage() {
 
       {/* Main Board */}
       <main className="scheduler-main">
-        {/* Supabase Connectivity Banner */}
+        {/* Supabase Connection Status Bar */}
         {isSupabaseConfigured ? (
           <div className="firebase-banner online">
-            <span>🟢 เชื่อมต่อ Supabase Database เรียบร้อยแล้ว (เซฟข้อมูลลง PostgreSQL แบบ Real-time)</span>
+            <span>🟢 เชื่อมต่อระบบคลาวด์ Supabase (บัญชี: {currentUser?.email || "กำลังเข้าสู่ระบบ"})</span>
             <button 
               className="firebase-banner-btn" 
               onClick={handleSeedDatabase}
               disabled={isSeeding}
             >
-              {isSeeding ? "กำลังอัปโหลด..." : "⚡ อัปโหลดข้อมูลตั้งต้นจำลอง"}
+              {isSeeding ? "กำลังส่งเข้าฐานข้อมูล..." : "⚡ อัปโหลดข้อมูลจำลองเข้าคลาวด์"}
             </button>
           </div>
         ) : (
           <div className="firebase-banner">
-            <span>⚠️ โหมดออฟไลน์ (Local Mock Mode) - กรุณากรอกรหัส Supabase ในไฟล์ `.env.local` เพื่อเซฟข้อมูลขึ้น Cloud จริง</span>
-            <span style={{ fontSize: "0.75rem", opacity: 0.8 }}>ข้อมูลตารางที่แก้อยู่ในเว็บจะหายไปเมื่อกด Refresh</span>
+            <span>⚠️ โหมดออฟไลน์ (Local Mock Mode) - กรุณาเชื่อมคีย์ `.env.local` เพื่อเขียนฐานข้อมูลจริง</span>
           </div>
         )}
 
         {/* Header */}
         <header className="scheduler-header">
           <div className="header-title-section">
-            <h1 style={{ fontSize: "1.5rem", fontWeight: 800 }}>จัดตารางเรียนตารางสอน</h1>
-            <span className="header-subtitle">ลากวิชาทางซ้ายวางลงบนตารางเพื่อวางชั่วโมงสอน</span>
-          </div>
-
-          <div className="view-controls">
-            <button
-              className={`view-btn ${activeView === "group" ? "active" : ""}`}
-              onClick={() => setActiveView("group")}
-            >
-              มุมมองห้องเรียน
-            </button>
-            <button
-              className={`view-btn ${activeView === "teacher" ? "active" : ""}`}
-              onClick={() => setActiveView("teacher")}
-            >
-              มุมมองรายครู
-            </button>
-            <button
-              className={`view-btn ${activeView === "room" ? "active" : ""}`}
-              onClick={() => setActiveView("room")}
-            >
-              มุมมองรายห้อง
-            </button>
+            <h1 style={{ fontSize: "1.5rem", fontWeight: 800 }}>
+              {isSettingsMode ? "ตั้งค่าข้อมูลวิชาการโรงเรียน" : "จัดตารางเรียนตารางสอน"}
+            </h1>
+            <span className="header-subtitle">
+              {isSettingsMode ? "เพิ่ม ลบ หรือแก้ไขข้อมูลคุณครู วิชาเรียน และสถานที่สำหรับจัดระบบตารางเรียน" : "ลากวิชาทางซ้ายวางลงบนตารางเพื่อจัดชั่วโมงสอนวิชาการ"}
+            </span>
           </div>
 
           <div className="action-controls">
@@ -731,168 +963,419 @@ export default function SchedulerPage() {
             >
               {isDarkMode ? "☀️" : "🌙"}
             </button>
-            <button
-              className="secondary-btn"
-              onClick={handleClearAllSchedules}
-            >
-              ล้างตารางทั้งหมด
-            </button>
-            <button
-              className="primary-btn"
-              onClick={() => {
-                alert("ข้อมูลจะถูกบันทึกโดยอัตโนมัติเมื่อจัดตารางเรียน");
-              }}
-              style={{ opacity: isSupabaseConfigured ? 0.7 : 1 }}
-            >
-              {isSupabaseConfigured ? "ระบบบันทึกอัตโนมัติ" : "บันทึกข้อมูล"}
+
+            {!isSettingsMode ? (
+              <>
+                <button className="secondary-btn" onClick={handlePrint} title="พิมพ์ตารางกระดาษ">
+                  🖨️ พิมพ์ตาราง
+                </button>
+                <button 
+                  className="secondary-btn" 
+                  onClick={() => setIsSettingsMode(true)}
+                  title="ตั้งค่าคุณครู วิชา ห้องเรียน"
+                >
+                  ⚙️ ตั้งค่าระบบวิชาการ
+                </button>
+                <button className="secondary-btn" onClick={handleClearAllSchedules}>
+                  ล้างตารางทั้งหมด
+                </button>
+              </>
+            ) : (
+              <button className="primary-btn" onClick={() => setIsSettingsMode(false)}>
+                ✓ เสร็จสิ้นการตั้งค่า
+              </button>
+            )}
+
+            <button className="secondary-btn" onClick={handleSignOut} style={{ borderColor: "rgba(244, 63, 94, 0.4)", color: "#fca5a5" }}>
+              ออกจากระบบ 🚪
             </button>
           </div>
         </header>
 
-        {/* Timetable Grid Container */}
+        {/* Content Area */}
         <div className="scheduler-content">
-          <div className="timetable-card">
-            <div style={{ marginBottom: "1rem", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <h2 style={{ fontSize: "1.1rem", fontWeight: 700 }}>
-                {activeView === "group" && `ตารางเรียน: ${studentGroups.find(g => g.id === selectedGroupId)?.name}`}
-                {activeView === "teacher" && `ตารางสอน: ${teachers.find(t => t.id === selectedTeacherId)?.name}`}
-                {activeView === "room" && `ตารางใช้ห้อง: ${classrooms.find(r => r.id === selectedRoomId)?.name}`}
-              </h2>
-              <span style={{ fontSize: "0.85rem", color: "var(--text-secondary)" }}>
-                คาบพักกลางวันถูกตรึงไว้เป็นคาบพิเศษ
-              </span>
-            </div>
-
-            <div className="timetable-grid">
-              {/* Header Row */}
-              <div className="grid-header-cell day-label">
-                <span>วัน / เวลา</span>
-              </div>
-              {PERIOD_TIMES.map((pt, idx) => (
-                <div key={idx} className="grid-header-cell">
-                  <span style={{ fontWeight: pt.num === 0 ? 800 : 700 }}>{pt.label}</span>
-                  <span className="period-time">{pt.time}</span>
+          {!isSettingsMode ? (
+            /* TIMETABLE VIEW */
+            <div className="timetable-card">
+              <div style={{ marginBottom: "1rem", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <h2 style={{ fontSize: "1.1rem", fontWeight: 700 }}>
+                  {activeView === "group" && `ตารางเรียน: ${studentGroups.find(g => g.id === selectedGroupId)?.name || "ชั้นเรียน"}`}
+                  {activeView === "teacher" && `ตารางสอน: ${teachers.find(t => t.id === selectedTeacherId)?.name || "ตารางสอนครู"}`}
+                  {activeView === "room" && `ตารางใช้ห้อง: ${classrooms.find(r => r.id === selectedRoomId)?.name || "ตารางห้องเรียน"}`}
+                </h2>
+                
+                {/* Visual View Filters inside grid */}
+                <div className="view-controls">
+                  <button className={`view-btn ${activeView === "group" ? "active" : ""}`} onClick={() => setActiveView("group")}>ตารางห้องเรียน</button>
+                  <button className={`view-btn ${activeView === "teacher" ? "active" : ""}`} onClick={() => setActiveView("teacher")}>ตารางรายครู</button>
+                  <button className={`view-btn ${activeView === "room" ? "active" : ""}`} onClick={() => setActiveView("room")}>ตารางรายห้อง</button>
                 </div>
-              ))}
+              </div>
 
-              {/* Day Rows */}
-              {DAYS.map((day) => (
-                <div key={day.value} className="day-row">
-                  {/* Day Label Header */}
-                  <div className={`day-header-cell ${day.class}`}>
-                    <span>{day.name}</span>
-                    <span className="day-sub">{day.sub}</span>
+              <div className="timetable-grid">
+                {/* Header Row */}
+                <div className="grid-header-cell day-label">
+                  <span>วัน / เวลา</span>
+                </div>
+                {PERIOD_TIMES.map((pt, idx) => (
+                  <div key={idx} className="grid-header-cell">
+                    <span style={{ fontWeight: pt.num === 0 ? 800 : 700 }}>{pt.label}</span>
+                    <span className="period-time">{pt.time}</span>
                   </div>
+                ))}
 
-                  {/* Timetable periods */}
-                  {PERIOD_TIMES.map((pt) => {
-                    if (pt.num === 0) {
-                      return (
-                        <div key={`${day.value}-lunch`} className="grid-cell lunch-slot">
-                          พักกลางวัน
-                        </div>
+                {/* Day Rows */}
+                {DAYS.map((day) => (
+                  <div key={day.value} className="day-row">
+                    <div className={`day-header-cell ${day.class}`}>
+                      <span>{day.name}</span>
+                      <span className="day-sub">{day.sub}</span>
+                    </div>
+
+                    {/* Timetable periods */}
+                    {PERIOD_TIMES.map((pt) => {
+                      if (pt.num === 0) {
+                        return (
+                          <div key={`${day.value}-lunch`} className="grid-cell lunch-slot">
+                            พักกลางวัน
+                          </div>
+                        );
+                      }
+
+                      const slot = visibleSchedules.find(
+                        (s) => s.dayOfWeek === day.value && s.period === pt.num
                       );
-                    }
 
-                    const slot = visibleSchedules.find(
-                      (s) => s.dayOfWeek === day.value && s.period === pt.num
-                    );
+                      const isHovered = hoveredCell && hoveredCell.day === day.value && hoveredCell.period === pt.num;
 
-                    const isHovered =
-                      hoveredCell &&
-                      hoveredCell.day === day.value &&
-                      hoveredCell.period === pt.num;
+                      let slotConflicts: ConflictDetail[] = [];
+                      if (slot) {
+                        slotConflicts = getConflictsForSlot(slot);
+                      }
 
-                    let slotConflicts: ConflictDetail[] = [];
-                    if (slot) {
-                      slotConflicts = getConflictsForSlot(slot);
-                    }
+                      return (
+                        <div
+                          key={`${day.value}-${pt.num}`}
+                          className={`grid-cell ${isHovered ? "drag-over" : ""}`}
+                          onDragOver={(e) => handleDragOver(e, day.value, pt.num)}
+                          onDragLeave={handleDragLeave}
+                          onDrop={(e) => handleDrop(e, day.value, pt.num)}
+                        >
+                          {slot ? (
+                            (() => {
+                              const course = courses.find((c) => c.id === slot.courseId);
+                              const teacher = teachers.find((t) => t.id === slot.teacherId);
+                              const room = classrooms.find((r) => r.id === slot.classroomId);
+                              const group = studentGroups.find((g) => g.id === slot.studentGroupId);
+                              const hasConflict = slotConflicts.length > 0;
 
-                    return (
-                      <div
-                        key={`${day.value}-${pt.num}`}
-                        className={`grid-cell ${isHovered ? "drag-over" : ""}`}
-                        onDragOver={(e) => handleDragOver(e, day.value, pt.num)}
-                        onDragLeave={handleDragLeave}
-                        onDrop={(e) => handleDrop(e, day.value, pt.num)}
-                      >
-                        {slot ? (
-                          (() => {
-                            const course = courses.find((c) => c.id === slot.courseId);
-                            const teacher = teachers.find((t) => t.id === slot.teacherId);
-                            const room = classrooms.find((r) => r.id === slot.classroomId);
-                            const group = studentGroups.find((g) => g.id === slot.studentGroupId);
-                            const hasConflict = slotConflicts.length > 0;
-
-                            return (
-                              <div
-                                className={`scheduled-card ${hasConflict ? "has-conflict" : ""}`}
-                                draggable
-                                onDragStart={(e) => handleCardDragStart(e, slot)}
-                                onDragEnd={handleDragEnd}
-                              >
-                                <div className="card-top">
-                                  <span className="card-subject">
-                                    {course?.name} ({course?.code})
-                                  </span>
-                                  <div style={{ display: "flex", gap: "0.2rem", alignItems: "center" }}>
-                                    {hasConflict && (
-                                      <div className="warning-icon-wrapper" style={{ position: "relative" }}>
-                                        <span className="warning-icon">⚠️</span>
-                                        <div className="conflict-tooltip">
-                                          <div className="conflict-tooltip-title">
-                                            <span>⚠️ การชนกันของตาราง</span>
-                                          </div>
-                                          {slotConflicts.map((c, i) => (
-                                            <div key={i} style={{ marginBottom: "0.2rem" }}>
-                                              • {c.message}
+                              return (
+                                <div
+                                  className={`scheduled-card ${hasConflict ? "has-conflict" : ""}`}
+                                  draggable
+                                  onDragStart={(e) => handleCardDragStart(e, slot)}
+                                  onDragEnd={handleDragEnd}
+                                >
+                                  <div className="card-top">
+                                    <span className="card-subject">{course?.name} ({course?.code})</span>
+                                    <div style={{ display: "flex", gap: "0.2rem", alignItems: "center" }}>
+                                      {hasConflict && (
+                                        <div className="warning-icon-wrapper" style={{ position: "relative" }}>
+                                          <span className="warning-icon">⚠️</span>
+                                          <div className="conflict-tooltip">
+                                            <div className="conflict-tooltip-title">
+                                              <span>⚠️ การชนกันของตาราง</span>
                                             </div>
-                                          ))}
+                                            {slotConflicts.map((c, i) => (
+                                              <div key={i} style={{ marginBottom: "0.2rem" }}>• {c.message}</div>
+                                            ))}
+                                          </div>
                                         </div>
-                                      </div>
-                                    )}
-                                    <button
-                                      className="card-delete"
-                                      onClick={(e) => handleDeleteSlot(slot.id, e)}
-                                      title="ลบวิชานี้"
-                                    >
-                                      ✕
-                                    </button>
+                                      )}
+                                      <button className="card-delete" onClick={(e) => handleDeleteSlot(slot.id, e)} title="ลบวิชานี้">✕</button>
+                                    </div>
+                                  </div>
+
+                                  <div className="card-details">
+                                    {activeView !== "teacher" && <span className="detail-badge teacher">👤 {teacher?.name || "ไม่ระบุครู"}</span>}
+                                    {activeView !== "room" && <span className="detail-badge room">🏫 {room?.name || "ไม่ระบุห้อง"}</span>}
+                                    {activeView !== "group" && <span className="detail-badge group">👥 {group?.name || "ไม่ระบุชั้น"}</span>}
                                   </div>
                                 </div>
-
-                                <div className="card-details">
-                                  {activeView !== "teacher" && (
-                                    <span className="detail-badge teacher">
-                                      👤 {teacher?.name || "ไม่ระบุครู"}
-                                    </span>
-                                  )}
-                                  {activeView !== "room" && (
-                                    <span className="detail-badge room">
-                                      🏫 {room?.name || "ไม่ระบุห้อง"}
-                                    </span>
-                                  )}
-                                  {activeView !== "group" && (
-                                    <span className="detail-badge group">
-                                      👥 {group?.name || "ไม่ระบุชั้น"}
-                                    </span>
-                                  )}
-                                </div>
-                              </div>
-                            );
-                          })()
-                        ) : null}
-                      </div>
-                    );
-                  })}
-                </div>
-              ))}
+                              );
+                            })()
+                          ) : null}
+                        </div>
+                      );
+                    })}
+                  </div>
+                ))}
+              </div>
             </div>
-          </div>
+          ) : (
+            /* CONFIGURATION SETTINGS PANEL */
+            <div className="timetable-card settings-section-container">
+              {/* TAB 1: TEACHER MANAGEMENT */}
+              {activeSettingsTab === "teachers" && (
+                <div className="settings-grid">
+                  <form className="settings-card" onSubmit={handleAddTeacher}>
+                    <h3 style={{ fontSize: "1.1rem", fontWeight: 700 }}>➕ เพิ่มข้อมูลครูผู้สอน</h3>
+                    <div className="form-group">
+                      <label className="form-label">ชื่อ - นามสกุลครู</label>
+                      <input 
+                        type="text" 
+                        className="select-input" 
+                        placeholder="เช่น ครูวิภา วิริยะ"
+                        value={teacherName} 
+                        onChange={(e) => setTeacherName(e.target.value)} 
+                        required
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">สาขาวิชาที่สอน</label>
+                      <input 
+                        type="text" 
+                        className="select-input" 
+                        placeholder="เช่น ฟิสิกส์, เคมี, แนะแนว"
+                        value={teacherSubject} 
+                        onChange={(e) => setTeacherSubject(e.target.value)} 
+                        required
+                      />
+                    </div>
+                    <button type="submit" className="primary-btn" style={{ padding: "0.75rem" }}>บันทึกคุณครู</button>
+                  </form>
+
+                  <div className="settings-card" style={{ flexGrow: 1 }}>
+                    <h3 style={{ fontSize: "1.1rem", fontWeight: 700 }}>👥 บุคลากรทั้งหมดในระบบ ({teachers.length} คน)</h3>
+                    <div className="settings-table-wrapper">
+                      <table className="settings-table">
+                        <thead>
+                          <tr>
+                            <th>ชื่อคุณครู</th>
+                            <th>วิชาการที่สอน</th>
+                            <th style={{ width: "80px", textAlign: "center" }}>จัดการ</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {teachers.map((t) => (
+                            <tr key={t.id}>
+                              <td><strong>{t.name}</strong></td>
+                              <td><span style={{ background: "rgba(255,255,255,0.05)", padding: "0.25rem 0.5rem", borderRadius: "4px" }}>{t.subject}</span></td>
+                              <td style={{ textAlign: "center" }}>
+                                <button className="icon-btn delete" onClick={() => handleDeleteTeacher(t.id)} title="ลบครู">🗑️</button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* TAB 2: COURSE MANAGEMENT */}
+              {activeSettingsTab === "courses" && (
+                <div className="settings-grid">
+                  <form className="settings-card" onSubmit={handleAddCourse}>
+                    <h3 style={{ fontSize: "1.1rem", fontWeight: 700 }}>➕ เพิ่มวิชาเรียนใหม่</h3>
+                    <div className="form-group">
+                      <label className="form-label">รหัสวิชา</label>
+                      <input 
+                        type="text" 
+                        className="select-input" 
+                        placeholder="เช่น ว32201"
+                        value={courseCode} 
+                        onChange={(e) => setCourseCode(e.target.value)} 
+                        required
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">ชื่อวิชาเรียน</label>
+                      <input 
+                        type="text" 
+                        className="select-input" 
+                        placeholder="เช่น ฟิสิกส์พื้นฐาน"
+                        value={courseName} 
+                        onChange={(e) => setCourseName(e.target.value)} 
+                        required
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">ครูผู้สอนเริ่มต้น (Default)</label>
+                      <select 
+                        className="select-input" 
+                        value={courseTeacherId} 
+                        onChange={(e) => setCourseTeacherId(e.target.value)}
+                      >
+                        <option value="">-- เลือกครูผู้สอนเริ่มต้น --</option>
+                        {teachers.map(t => (
+                          <option key={t.id} value={t.id}>{t.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">ห้องเรียนเริ่มต้น (Default)</label>
+                      <select 
+                        className="select-input" 
+                        value={courseRoomId} 
+                        onChange={(e) => setCourseRoomId(e.target.value)}
+                      >
+                        <option value="">-- เลือกห้องเรียนเริ่มต้น --</option>
+                        {classrooms.map(r => (
+                          <option key={r.id} value={r.id}>{r.name} ({r.type})</option>
+                        ))}
+                      </select>
+                    </div>
+                    <button type="submit" className="primary-btn" style={{ padding: "0.75rem" }}>บันทึกวิชาเรียน</button>
+                  </form>
+
+                  <div className="settings-card" style={{ flexGrow: 1 }}>
+                    <h3 style={{ fontSize: "1.1rem", fontWeight: 700 }}>📚 วิชาเรียนทั้งหมดในหลักสูตร ({courses.length} วิชา)</h3>
+                    <div className="settings-table-wrapper">
+                      <table className="settings-table">
+                        <thead>
+                          <tr>
+                            <th>รหัสวิชา</th>
+                            <th>ชื่อวิชา</th>
+                            <th>ครูเริ่มต้น</th>
+                            <th>ห้องเริ่มต้น</th>
+                            <th style={{ width: "80px", textAlign: "center" }}>จัดการ</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {courses.map((c) => {
+                            const teacher = teachers.find(t => t.id === c.defaultTeacherId);
+                            const room = classrooms.find(r => r.id === c.defaultClassroomId);
+                            return (
+                              <tr key={c.id}>
+                                <td><code>{c.code}</code></td>
+                                <td><strong>{c.name}</strong></td>
+                                <td style={{ color: "var(--accent-purple)" }}>{teacher ? teacher.name.split(" ")[0] : "ไม่ได้ระบุ"}</td>
+                                <td style={{ color: "var(--accent-green)" }}>{room ? room.name : "ไม่ได้ระบุ"}</td>
+                                <td style={{ textAlign: "center" }}>
+                                  <button className="icon-btn delete" onClick={() => handleDeleteCourse(c.id)} title="ลบวิชา">🗑️</button>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* TAB 3: CLASSROOM MANAGEMENT */}
+              {activeSettingsTab === "rooms" && (
+                <div className="settings-grid">
+                  <form className="settings-card" onSubmit={handleAddClassroom}>
+                    <h3 style={{ fontSize: "1.1rem", fontWeight: 700 }}>➕ เพิ่มห้องเรียนใหม่</h3>
+                    <div className="form-group">
+                      <label className="form-label">ชื่อห้องเรียน</label>
+                      <input 
+                        type="text" 
+                        className="select-input" 
+                        placeholder="เช่น ห้อง 305, Lab วิทย์ 2"
+                        value={roomName} 
+                        onChange={(e) => setRoomName(e.target.value)} 
+                        required
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">ประเภทห้องเรียน</label>
+                      <select 
+                        className="select-input" 
+                        value={roomType} 
+                        onChange={(e) => setRoomType(e.target.value)}
+                      >
+                        <option value="ห้องเรียนทั่วไป">ห้องเรียนทั่วไป</option>
+                        <option value="ห้องทดลองวิทยาศาสตร์">ห้องทดลองวิทยาศาสตร์</option>
+                        <option value="ห้องปฏิบัติการทางภาษา">ห้องปฏิบัติการทางภาษา</option>
+                        <option value="ห้องคอมพิวเตอร์">ห้องคอมพิวเตอร์</option>
+                        <option value="หอประชุม/ยิม">หอประชุม/ยิม</option>
+                      </select>
+                    </div>
+                    <button type="submit" className="primary-btn" style={{ padding: "0.75rem" }}>บันทึกห้องเรียน</button>
+                  </form>
+
+                  <div className="settings-card" style={{ flexGrow: 1 }}>
+                    <h3 style={{ fontSize: "1.1rem", fontWeight: 700 }}>🏫 สถานที่/ห้องเรียนทั้งหมด ({classrooms.length} ห้อง)</h3>
+                    <div className="settings-table-wrapper">
+                      <table className="settings-table">
+                        <thead>
+                          <tr>
+                            <th>ชื่อห้องเรียน</th>
+                            <th>ประเภทห้องเรียน</th>
+                            <th style={{ width: "80px", textAlign: "center" }}>จัดการ</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {classrooms.map((r) => (
+                            <tr key={r.id}>
+                              <td><strong>{r.name}</strong></td>
+                              <td><span style={{ color: "var(--accent-green)" }}>{r.type}</span></td>
+                              <td style={{ textAlign: "center" }}>
+                                <button className="icon-btn delete" onClick={() => handleDeleteClassroom(r.id)} title="ลบห้อง">🗑️</button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* TAB 4: GROUP MANAGEMENT */}
+              {activeSettingsTab === "groups" && (
+                <div className="settings-grid">
+                  <form className="settings-card" onSubmit={handleAddGroup}>
+                    <h3 style={{ fontSize: "1.1rem", fontWeight: 700 }}>➕ เพิ่มชั้นเรียน/กลุ่มเรียน</h3>
+                    <div className="form-group">
+                      <label className="form-label">ชื่อระดับชั้น / กลุ่ม</label>
+                      <input 
+                        type="text" 
+                        className="select-input" 
+                        placeholder="เช่น ชั้น ม.3/1"
+                        value={groupName} 
+                        onChange={(e) => setGroupName(e.target.value)} 
+                        required
+                      />
+                    </div>
+                    <button type="submit" className="primary-btn" style={{ padding: "0.75rem" }}>บันทึกชั้นเรียน</button>
+                  </form>
+
+                  <div className="settings-card" style={{ flexGrow: 1 }}>
+                    <h3 style={{ fontSize: "1.1rem", fontWeight: 700 }}>👥 ชั้นเรียน/กลุ่มเรียนทั้งหมด ({studentGroups.length} กลุ่ม)</h3>
+                    <div className="settings-table-wrapper">
+                      <table className="settings-table">
+                        <thead>
+                          <tr>
+                            <th>ชื่อชั้นเรียน (Student Group)</th>
+                            <th style={{ width: "80px", textAlign: "center" }}>จัดการ</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {studentGroups.map((g) => (
+                            <tr key={g.id}>
+                              <td><strong>{g.name}</strong></td>
+                              <td style={{ textAlign: "center" }}>
+                                <button className="icon-btn delete" onClick={() => handleDeleteGroup(g.id)} title="ลบชั้นเรียน">🗑️</button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </main>
 
-      {/* Assignment Modal */}
+      {/* Timetable Drop Assignment Modal */}
       {isModalOpen && modalData && (
         <div className="modal-overlay">
           <div className="modal-content">
@@ -913,8 +1396,8 @@ export default function SchedulerPage() {
                 <input
                   type="text"
                   className="select-input"
-                  value={`${courses.find((c) => c.id === modalData.courseId)?.name} (${
-                    courses.find((c) => c.id === modalData.courseId)?.code
+                  value={`${courses.find((c) => c.id === modalData.courseId)?.name || "วิชา"} (${
+                    courses.find((c) => c.id === modalData.courseId)?.code || "รหัส"
                   })`}
                   disabled
                   style={{ opacity: 0.7, cursor: "not-allowed" }}
@@ -927,15 +1410,11 @@ export default function SchedulerPage() {
                   <select
                     className="select-input"
                     value={modalData.studentGroupId}
-                    onChange={(e) =>
-                      setModalData({ ...modalData, studentGroupId: e.target.value })
-                    }
+                    onChange={(e) => setModalData({ ...modalData, studentGroupId: e.target.value })}
                     required
                   >
                     {studentGroups.map((g) => (
-                      <option key={g.id} value={g.id}>
-                        {g.name}
-                      </option>
+                      <option key={g.id} value={g.id}>{g.name}</option>
                     ))}
                   </select>
                 </div>
@@ -951,9 +1430,7 @@ export default function SchedulerPage() {
                 >
                   <option value="">-- เลือกครูผู้สอน --</option>
                   {teachers.map((t) => (
-                    <option key={t.id} value={t.id}>
-                      {t.name} ({t.subject})
-                    </option>
+                    <option key={t.id} value={t.id}>{t.name} ({t.subject})</option>
                   ))}
                 </select>
               </div>
@@ -968,9 +1445,7 @@ export default function SchedulerPage() {
                 >
                   <option value="">-- เลือกห้องเรียน --</option>
                   {classrooms.map((r) => (
-                    <option key={r.id} value={r.id}>
-                      {r.name} ({r.type})
-                    </option>
+                    <option key={r.id} value={r.id}>{r.name} ({r.type})</option>
                   ))}
                 </select>
               </div>
@@ -987,9 +1462,7 @@ export default function SchedulerPage() {
                 >
                   ยกเลิก
                 </button>
-                <button type="submit" className="primary-btn">
-                  ตกลง / บันทึก
-                </button>
+                <button type="submit" className="primary-btn">ตกลง / บันทึก</button>
               </div>
             </form>
           </div>
