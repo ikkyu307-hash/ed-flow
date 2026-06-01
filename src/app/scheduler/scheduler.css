@@ -355,7 +355,7 @@
 
 .timetable-grid {
   display: grid;
-  grid-template-columns: 120px repeat(8, 1fr);
+  grid-template-columns: 120px repeat(9, 1fr);
   min-width: 900px;
   border-collapse: collapse;
 }
