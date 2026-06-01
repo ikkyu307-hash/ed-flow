@@ -54,3 +54,11 @@ alter publication supabase_realtime add table teachers;
 alter publication supabase_realtime add table classrooms;
 alter publication supabase_realtime add table courses;
 alter publication supabase_realtime add table student_groups;
+
+-- 7. Disable Row Level Security (RLS) on all tables
+-- This ensures the client-side CRUD operations and onboarding submit can interact with the tables without policies blocking them.
+ALTER TABLE teachers DISABLE ROW LEVEL SECURITY;
+ALTER TABLE classrooms DISABLE ROW LEVEL SECURITY;
+ALTER TABLE courses DISABLE ROW LEVEL SECURITY;
+ALTER TABLE student_groups DISABLE ROW LEVEL SECURITY;
+ALTER TABLE schedules DISABLE ROW LEVEL SECURITY;
