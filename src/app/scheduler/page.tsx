@@ -2,16 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import "./scheduler.css";
-import { db, isFirebaseConfigured } from "@/lib/firebase";
-import {
-  collection,
-  onSnapshot,
-  doc,
-  setDoc,
-  deleteDoc,
-  getDocs,
-  writeBatch,
-} from "firebase/firestore";
+import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 
 // Interface Definitions
 interface Teacher {
@@ -163,117 +154,168 @@ export default function SchedulerPage() {
     }
   }, [isDarkMode]);
 
-  // Firebase Real-time Synchronization
+  // Fetch initial data from Supabase
+  const fetchInitialData = async () => {
+    if (!isSupabaseConfigured || !supabase) return;
+
+    try {
+      const [tRes, cRes, coRes, gRes, sRes] = await Promise.all([
+        supabase.from("teachers").select("*"),
+        supabase.from("classrooms").select("*"),
+        supabase.from("courses").select("*"),
+        supabase.from("student_groups").select("*"),
+        supabase.from("schedules").select("*"),
+      ]);
+
+      if (tRes.data && tRes.data.length > 0) setTeachers(tRes.data as Teacher[]);
+      if (cRes.data && cRes.data.length > 0) setClassrooms(cRes.data as Classroom[]);
+      
+      if (coRes.data && coRes.data.length > 0) {
+        const mappedCourses: Course[] = coRes.data.map((co: any) => ({
+          id: co.id,
+          code: co.code,
+          name: co.name,
+          color: co.color,
+          defaultTeacherId: co.default_teacher_id,
+          defaultClassroomId: co.default_classroom_id,
+        }));
+        setCourses(mappedCourses);
+      }
+
+      if (gRes.data && gRes.data.length > 0) {
+        const mappedGroups: StudentGroup[] = gRes.data.map((g: any) => ({
+          id: g.id,
+          name: g.name,
+        }));
+        setStudentGroups(mappedGroups);
+      }
+
+      if (sRes.data) {
+        const mappedSchedules: ScheduleSlot[] = sRes.data.map((s: any) => ({
+          id: s.id,
+          courseId: s.course_id,
+          teacherId: s.teacher_id,
+          classroomId: s.classroom_id,
+          studentGroupId: s.student_group_id,
+          dayOfWeek: s.day_of_week,
+          period: s.period,
+        }));
+        setSchedules(mappedSchedules);
+      }
+    } catch (err) {
+      console.error("Error fetching initial Supabase data:", err);
+    }
+  };
+
+  // Supabase Real-time Synchronization
   useEffect(() => {
-    if (!isFirebaseConfigured || !db) {
-      console.log("Firebase is offline. Using local memory storage.");
+    if (!isSupabaseConfigured || !supabase) {
+      console.log("Supabase is offline. Using local memory storage.");
       return;
     }
 
-    console.log("Firebase is online. Subscribing to collections...");
+    console.log("Supabase is online. Loading data and subscribing to realtime...");
+    fetchInitialData();
 
-    // 1. Subscribe to teachers
-    const unsubscribeTeachers = onSnapshot(collection(db, "teachers"), (snapshot) => {
-      const list: Teacher[] = [];
-      snapshot.forEach((doc) => {
-        list.push({ id: doc.id, ...doc.data() } as Teacher);
-      });
-      if (list.length > 0) setTeachers(list);
+    // Map DB schema columns to camelCase JS state
+    const mapSlot = (item: any): ScheduleSlot => ({
+      id: item.id,
+      courseId: item.course_id,
+      teacherId: item.teacher_id,
+      classroomId: item.classroom_id,
+      studentGroupId: item.student_group_id,
+      dayOfWeek: item.day_of_week,
+      period: item.period,
     });
 
-    // 2. Subscribe to classrooms
-    const unsubscribeClassrooms = onSnapshot(collection(db, "classrooms"), (snapshot) => {
-      const list: Classroom[] = [];
-      snapshot.forEach((doc) => {
-        list.push({ id: doc.id, ...doc.data() } as Classroom);
-      });
-      if (list.length > 0) setClassrooms(list);
-    });
-
-    // 3. Subscribe to courses
-    const unsubscribeCourses = onSnapshot(collection(db, "courses"), (snapshot) => {
-      const list: Course[] = [];
-      snapshot.forEach((doc) => {
-        list.push({ id: doc.id, ...doc.data() } as Course);
-      });
-      if (list.length > 0) setCourses(list);
-    });
-
-    // 4. Subscribe to studentGroups
-    const unsubscribeGroups = onSnapshot(collection(db, "studentGroups"), (snapshot) => {
-      const list: StudentGroup[] = [];
-      snapshot.forEach((doc) => {
-        list.push({ id: doc.id, ...doc.data() } as StudentGroup);
-      });
-      if (list.length > 0) setStudentGroups(list);
-    });
-
-    // 5. Subscribe to schedules
-    const unsubscribeSchedules = onSnapshot(collection(db, "schedules"), (snapshot) => {
-      const list: ScheduleSlot[] = [];
-      snapshot.forEach((doc) => {
-        list.push({ id: doc.id, ...doc.data() } as ScheduleSlot);
-      });
-      setSchedules(list);
-    });
+    // Realtime channel listener for postgres changes on schedules table
+    const channel = supabase
+      .channel("schedules-realtime")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "schedules" },
+        (payload: any) => {
+          console.log("Real-time database payload received:", payload);
+          if (payload.eventType === "INSERT") {
+            setSchedules((prev) => {
+              if (prev.some((s) => s.id === payload.new.id)) return prev;
+              return [...prev, mapSlot(payload.new)];
+            });
+          } else if (payload.eventType === "UPDATE") {
+            setSchedules((prev) =>
+              prev.map((s) => (s.id === payload.new.id ? mapSlot(payload.new) : s))
+            );
+          } else if (payload.eventType === "DELETE") {
+            setSchedules((prev) => prev.filter((s) => s.id !== payload.old.id));
+          }
+        }
+      )
+      .subscribe();
 
     return () => {
-      unsubscribeTeachers();
-      unsubscribeClassrooms();
-      unsubscribeCourses();
-      unsubscribeGroups();
-      unsubscribeSchedules();
+      supabase.removeChannel(channel);
     };
   }, []);
 
-  // Database Seeding Trigger (For fresh Firebase DB setup)
+  // Database Seeding Trigger (For fresh Supabase DB setup)
   const handleSeedDatabase = async () => {
-    if (!isFirebaseConfigured || !db) return;
+    if (!isSupabaseConfigured || !supabase) return;
     
     setIsSeeding(true);
     try {
-      const batch = writeBatch(db);
-      
-      // Set teachers
-      MOCK_TEACHERS.forEach((t) => {
-        batch.set(doc(db, "teachers", t.id), { name: t.name, subject: t.subject });
-      });
-      
-      // Set classrooms
-      MOCK_CLASSROOMS.forEach((r) => {
-        batch.set(doc(db, "classrooms", r.id), { name: r.name, type: r.type });
-      });
-      
-      // Set courses
-      MOCK_COURSES.forEach((c) => {
-        batch.set(doc(db, "courses", c.id), {
+      // 1. Seed Teachers
+      await supabase.from("teachers").upsert(
+        MOCK_TEACHERS.map((t) => ({
+          id: t.id,
+          name: t.name,
+          subject: t.subject,
+        }))
+      );
+
+      // 2. Seed Classrooms
+      await supabase.from("classrooms").upsert(
+        MOCK_CLASSROOMS.map((r) => ({
+          id: r.id,
+          name: r.name,
+          type: r.type,
+        }))
+      );
+
+      // 3. Seed Courses
+      await supabase.from("courses").upsert(
+        MOCK_COURSES.map((c) => ({
+          id: c.id,
           code: c.code,
           name: c.name,
           color: c.color,
-          defaultTeacherId: c.defaultTeacherId,
-          defaultClassroomId: c.defaultClassroomId,
-        });
-      });
-      
-      // Set groups
-      MOCK_STUDENT_GROUPS.forEach((g) => {
-        batch.set(doc(db, "studentGroups", g.id), { name: g.name });
-      });
+          default_teacher_id: c.defaultTeacherId,
+          default_classroom_id: c.defaultClassroomId,
+        }))
+      );
 
-      // Set initial schedules
-      INITIAL_SCHEDULES.forEach((s) => {
-        batch.set(doc(db, "schedules", s.id), {
-          courseId: s.courseId,
-          teacherId: s.teacherId,
-          classroomId: s.classroomId,
-          studentGroupId: s.studentGroupId,
-          dayOfWeek: s.dayOfWeek,
+      // 4. Seed Student Groups
+      await supabase.from("student_groups").upsert(
+        MOCK_STUDENT_GROUPS.map((g) => ({
+          id: g.id,
+          name: g.name,
+        }))
+      );
+
+      // 5. Seed Schedules
+      await supabase.from("schedules").upsert(
+        INITIAL_SCHEDULES.map((s) => ({
+          id: s.id,
+          course_id: s.courseId,
+          teacher_id: s.teacherId,
+          classroom_id: s.classroomId,
+          student_group_id: s.studentGroupId,
+          day_of_week: s.dayOfWeek,
           period: s.period,
-        });
-      });
+        }))
+      );
       
-      await batch.commit();
-      alert("จัดส่งข้อมูลตั้งต้นครู วิชา และตารางสอนจำลองขึ้น Cloud Firestore สำเร็จแล้ว!");
+      alert("จัดส่งข้อมูลตั้งต้นครู วิชา และตารางสอนจำลองขึ้น Supabase Database สำเร็จแล้ว!");
+      await fetchInitialData();
     } catch (err) {
       console.error("Seeding error:", err);
       alert("เกิดข้อผิดพลาดในการนำเข้าข้อมูล: " + (err as Error).message);
@@ -382,7 +424,7 @@ export default function SchedulerPage() {
     setIsModalOpen(true);
   };
 
-  // Save / Update Schedule Slot (Handles both Firebase & Offline local states)
+  // Save / Update Schedule Slot (Handles both Supabase & Offline local states)
   const handleSaveAssignment = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!modalData) return;
@@ -400,19 +442,21 @@ export default function SchedulerPage() {
       period,
     };
 
-    if (isFirebaseConfigured && db) {
+    if (isSupabaseConfigured && supabase) {
       try {
-        await setDoc(doc(db, "schedules", finalSlotId), {
-          courseId,
-          teacherId,
-          classroomId,
-          studentGroupId,
-          dayOfWeek: day,
-          period,
+        const { error } = await supabase.from("schedules").upsert({
+          id: finalSlotId,
+          course_id: courseId,
+          teacher_id: teacherId,
+          classroom_id: classroomId,
+          student_group_id: studentGroupId,
+          day_of_week: day,
+          period: period,
         });
+        if (error) throw error;
       } catch (err) {
-        console.error("Firebase save error:", err);
-        alert("ไม่สามารถบันทึกไปยัง Firebase ได้: " + (err as Error).message);
+        console.error("Supabase save error:", err);
+        alert("ไม่สามารถบันทึกไปยัง Supabase ได้: " + (err as Error).message);
       }
     } else {
       // Local State edit (Offline Mode)
@@ -435,12 +479,13 @@ export default function SchedulerPage() {
     e.stopPropagation();
     if (!confirm("คุณต้องการลบวิชาเรียนนี้ออกจากตารางใช่หรือไม่?")) return;
 
-    if (isFirebaseConfigured && db) {
+    if (isSupabaseConfigured && supabase) {
       try {
-        await deleteDoc(doc(db, "schedules", slotId));
+        const { error } = await supabase.from("schedules").delete().eq("id", slotId);
+        if (error) throw error;
       } catch (err) {
-        console.error("Firebase delete error:", err);
-        alert("ไม่สามารถลบข้อมูลจาก Firebase ได้: " + (err as Error).message);
+        console.error("Supabase delete error:", err);
+        alert("ไม่สามารถลบข้อมูลจาก Supabase ได้: " + (err as Error).message);
       }
     } else {
       setSchedules((prev) => prev.filter((s) => s.id !== slotId));
@@ -451,17 +496,15 @@ export default function SchedulerPage() {
   const handleClearAllSchedules = async () => {
     if (!confirm("คุณต้องการล้างข้อมูลตารางเรียนทั้งหมดใช่หรือไม่?")) return;
 
-    if (isFirebaseConfigured && db) {
+    if (isSupabaseConfigured && supabase) {
       try {
-        const querySnapshot = await getDocs(collection(db, "schedules"));
-        const batch = writeBatch(db);
-        querySnapshot.forEach((doc) => {
-          batch.delete(doc.ref);
-        });
-        await batch.commit();
+        // Delete all rows in schedules table
+        const { error } = await supabase.from("schedules").delete().neq("id", "0");
+        if (error) throw error;
+        setSchedules([]);
       } catch (err) {
-        console.error("Firebase clear error:", err);
-        alert("ไม่สามารถล้างข้อมูลใน Firebase ได้: " + (err as Error).message);
+        console.error("Supabase clear error:", err);
+        alert("ไม่สามารถล้างข้อมูลใน Supabase ได้: " + (err as Error).message);
       }
     } else {
       setSchedules([]);
@@ -633,10 +676,10 @@ export default function SchedulerPage() {
 
       {/* Main Board */}
       <main className="scheduler-main">
-        {/* Firebase Connectivity Banner */}
-        {isFirebaseConfigured ? (
+        {/* Supabase Connectivity Banner */}
+        {isSupabaseConfigured ? (
           <div className="firebase-banner online">
-            <span>🟢 เชื่อมต่อ Cloud Firestore เรียบร้อยแล้ว (การจัดตารางจะเซฟข้อมูลจริงลงคลาวด์แบบ Real-time)</span>
+            <span>🟢 เชื่อมต่อ Supabase Database เรียบร้อยแล้ว (เซฟข้อมูลลง PostgreSQL แบบ Real-time)</span>
             <button 
               className="firebase-banner-btn" 
               onClick={handleSeedDatabase}
@@ -647,7 +690,7 @@ export default function SchedulerPage() {
           </div>
         ) : (
           <div className="firebase-banner">
-            <span>⚠️ โหมดออฟไลน์ (Local Mock Mode) - กรุณากรอกรหัส Firebase ในไฟล์ `.env.local` เพื่อใช้งานเซฟฐานข้อมูลจริง</span>
+            <span>⚠️ โหมดออฟไลน์ (Local Mock Mode) - กรุณากรอกรหัส Supabase ในไฟล์ `.env.local` เพื่อเซฟข้อมูลขึ้น Cloud จริง</span>
             <span style={{ fontSize: "0.75rem", opacity: 0.8 }}>ข้อมูลตารางที่แก้อยู่ในเว็บจะหายไปเมื่อกด Refresh</span>
           </div>
         )}
@@ -699,9 +742,9 @@ export default function SchedulerPage() {
               onClick={() => {
                 alert("ข้อมูลจะถูกบันทึกโดยอัตโนมัติเมื่อจัดตารางเรียน");
               }}
-              style={{ opacity: isFirebaseConfigured ? 0.7 : 1 }}
+              style={{ opacity: isSupabaseConfigured ? 0.7 : 1 }}
             >
-              {isFirebaseConfigured ? "ระบบบันทึกอัตโนมัติ" : "บันทึกข้อมูล"}
+              {isSupabaseConfigured ? "ระบบบันทึกอัตโนมัติ" : "บันทึกข้อมูล"}
             </button>
           </div>
         </header>
