@@ -12,6 +12,16 @@ interface Teacher {
   subject: string;
 }
 
+const SUBJECT_OPTIONS = [
+  "คณิตศาสตร์",
+  "วิทยาศาสตร์",
+  "ภาษาอังกฤษ",
+  "ภาษาไทย",
+  "สังคมศึกษา",
+  "คอมพิวเตอร์/เทคโนโลยี",
+  "แนะแนว/กิจกรรม"
+];
+
 interface Classroom {
   id: string;
   name: string;
@@ -117,8 +127,19 @@ export default function SchedulerPage() {
   // Teacher Onboarding State
   const [isOnboarded, setIsOnboarded] = useState<boolean>(true);
   const [onboardingName, setOnboardingName] = useState("");
-  const [onboardingSubject, setOnboardingSubject] = useState("คณิตศาสตร์");
+  const [onboardingSubjects, setOnboardingSubjects] = useState<string[]>(["คณิตศาสตร์"]);
+  const [onboardingOtherSubject, setOnboardingOtherSubject] = useState("");
   const [savingOnboarding, setSavingOnboarding] = useState(false);
+
+  const handleOnboardingSubjectCheckboxChange = (subject: string) => {
+    setOnboardingSubjects((prev) => {
+      if (prev.includes(subject)) {
+        return prev.filter((s) => s !== subject);
+      } else {
+        return [...prev, subject];
+      }
+    });
+  };
 
   // Course filter state
   const [showMyCoursesOnly, setShowMyCoursesOnly] = useState<boolean>(false);
@@ -162,7 +183,8 @@ export default function SchedulerPage() {
 
   // School Settings CRUD inputs
   const [teacherName, setTeacherName] = useState("");
-  const [teacherSubject, setTeacherSubject] = useState("");
+  const [teacherSubjects, setTeacherSubjects] = useState<string[]>([]);
+  const [teacherOtherSubject, setTeacherOtherSubject] = useState("");
   
   const [roomName, setRoomName] = useState("");
   const [roomType, setRoomType] = useState("ห้องเรียนทั่วไป");
@@ -393,14 +415,26 @@ export default function SchedulerPage() {
   // Onboarding Submit
   const handleOnboardingSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!onboardingName || !onboardingSubject) return;
+    if (!onboardingName) return;
 
+    // Combine standard subjects and other subject
+    const selected = [...onboardingSubjects];
+    if (onboardingOtherSubject.trim()) {
+      selected.push(onboardingOtherSubject.trim());
+    }
+
+    if (selected.length === 0) {
+      alert("กรุณาเลือกหรือระบุวิชาสอนอย่างน้อย 1 วิชา");
+      return;
+    }
+
+    const subjectString = selected.join(", ");
     setSavingOnboarding(true);
     const teacherId = currentUser?.id || "mock-admin-id";
     const newTeacher: Teacher = {
       id: teacherId,
       name: onboardingName,
-      subject: onboardingSubject
+      subject: subjectString
     };
 
     try {
@@ -409,7 +443,7 @@ export default function SchedulerPage() {
           {
             id: teacherId,
             name: onboardingName,
-            subject: onboardingSubject
+            subject: subjectString
           }
         ]);
         if (error) throw error;
@@ -457,10 +491,22 @@ export default function SchedulerPage() {
   // Settings CRUD - Add Teacher
   const handleAddTeacher = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!teacherName || !teacherSubject) return;
+    if (!teacherName) return;
 
+    // Combine standard subjects and other subject
+    const selected = [...teacherSubjects];
+    if (teacherOtherSubject.trim()) {
+      selected.push(teacherOtherSubject.trim());
+    }
+
+    if (selected.length === 0) {
+      alert("กรุณาเลือกหรือระบุวิชาสอนอย่างน้อย 1 วิชา");
+      return;
+    }
+
+    const subjectString = selected.join(", ");
     const newId = `t-${Date.now()}`;
-    const newT = { id: newId, name: teacherName, subject: teacherSubject };
+    const newT = { id: newId, name: teacherName, subject: subjectString };
 
     if (isSupabaseConfigured && supabase) {
       const { error } = await supabase.from("teachers").insert([newT]);
@@ -469,7 +515,8 @@ export default function SchedulerPage() {
       setTeachers((prev) => [...prev, newT]);
     }
     setTeacherName("");
-    setTeacherSubject("");
+    setTeacherSubjects([]);
+    setTeacherOtherSubject("");
   };
 
   // Settings CRUD - Delete Teacher
@@ -842,21 +889,31 @@ export default function SchedulerPage() {
             </div>
 
             <div className="form-group">
-              <label className="form-label">วิชาเอกที่รับผิดชอบหลัก</label>
-              <select
+              <label className="form-label">วิชาเอกที่รับผิดชอบหลัก (เลือกได้มากกว่า 1 วิชา)</label>
+              <div className="subject-grid">
+                {SUBJECT_OPTIONS.map((sub) => {
+                  const isChecked = onboardingSubjects.includes(sub);
+                  return (
+                    <label key={sub} className={`subject-checkbox-label ${isChecked ? "selected" : ""}`}>
+                      <input
+                        type="checkbox"
+                        checked={isChecked}
+                        onChange={() => handleOnboardingSubjectCheckboxChange(sub)}
+                      />
+                      <span className="subject-checkbox-marker"></span>
+                      <span>{sub}</span>
+                    </label>
+                  );
+                })}
+              </div>
+              <input
+                type="text"
                 className="select-input"
-                value={onboardingSubject}
-                onChange={(e) => setOnboardingSubject(e.target.value)}
-                required
-              >
-                <option value="คณิตศาสตร์">คณิตศาสตร์</option>
-                <option value="วิทยาศาสตร์">วิทยาศาสตร์</option>
-                <option value="ภาษาอังกฤษ">ภาษาอังกฤษ</option>
-                <option value="ภาษาไทย">ภาษาไทย</option>
-                <option value="สังคมศึกษา">สังคมศึกษา</option>
-                <option value="คอมพิวเตอร์/เทคโนโลยี">คอมพิวเตอร์/เทคโนโลยี</option>
-                <option value="แนะแนว/กิจกรรม">แนะแนว/กิจกรรม</option>
-              </select>
+                placeholder="วิชาเอกอื่นๆ (ระบุเพิ่มเติม เช่น ฝรั่งเศส, ดนตรี)"
+                value={onboardingOtherSubject}
+                onChange={(e) => setOnboardingOtherSubject(e.target.value)}
+                style={{ marginTop: "0.25rem" }}
+              />
             </div>
 
             <div style={{ marginTop: "1rem", fontSize: "0.8rem", color: "var(--text-secondary)", lineHeight: "1.4" }}>
@@ -1325,14 +1382,38 @@ export default function SchedulerPage() {
                       />
                     </div>
                     <div className="form-group">
-                      <label className="form-label">สาขาวิชาที่สอน</label>
+                      <label className="form-label">สาขาวิชาที่สอน (เลือกได้มากกว่า 1 วิชา)</label>
+                      <div className="subject-grid">
+                        {SUBJECT_OPTIONS.map((sub) => {
+                          const isChecked = teacherSubjects.includes(sub);
+                          return (
+                            <label key={sub} className={`subject-checkbox-label ${isChecked ? "selected" : ""}`}>
+                              <input
+                                type="checkbox"
+                                checked={isChecked}
+                                onChange={() => {
+                                  setTeacherSubjects(prev => {
+                                    if (prev.includes(sub)) {
+                                      return prev.filter(s => s !== sub);
+                                    } else {
+                                      return [...prev, sub];
+                                    }
+                                  });
+                                }}
+                              />
+                              <span className="subject-checkbox-marker"></span>
+                              <span>{sub}</span>
+                            </label>
+                          );
+                        })}
+                      </div>
                       <input 
                         type="text" 
                         className="select-input" 
-                        placeholder="เช่น ฟิสิกส์, เคมี, แนะแนว"
-                        value={teacherSubject} 
-                        onChange={(e) => setTeacherSubject(e.target.value)} 
-                        required
+                        placeholder="วิชาอื่นๆ (ระบุเพิ่มเติม เช่น ฟิสิกส์, ดนตรี)"
+                        value={teacherOtherSubject} 
+                        onChange={(e) => setTeacherOtherSubject(e.target.value)} 
+                        style={{ marginTop: "0.25rem" }}
                       />
                     </div>
                     <button type="submit" className="primary-btn" style={{ padding: "0.75rem" }}>บันทึกคุณครู</button>
