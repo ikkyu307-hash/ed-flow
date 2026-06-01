@@ -1105,4 +1105,25 @@
   border-radius: 8px;
 }
 
+/* Sidebar slide toggle styles */
+.scheduler-sidebar {
+  transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1), padding 0.3s ease, border-right 0.3s ease, opacity 0.2s ease;
+}
+
+.scheduler-sidebar.collapsed {
+  width: 0 !important;
+  padding: 0 !important;
+  border-right: none !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+  overflow: hidden !important;
+}
+
+.sidebar-toggle-btn:hover {
+  background: rgba(56, 189, 248, 0.1) !important;
+  border-color: var(--accent-color) !important;
+  color: var(--accent-color) !important;
+  box-shadow: 0 0 8px rgba(56, 189, 248, 0.15);
+}
+
 

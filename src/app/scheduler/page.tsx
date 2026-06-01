@@ -148,6 +148,10 @@ export default function SchedulerPage() {
   const [showMyGroupsOnly, setShowMyGroupsOnly] = useState<boolean>(false);
   const [expandedGrades, setExpandedGrades] = useState<{ [key: string]: boolean }>({});
 
+  // Sidebar visibility & course rooms accordion states
+  const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(true);
+  const [expandedCourseRooms, setExpandedCourseRooms] = useState<{ [key: string]: boolean }>({});
+
   // Master lists
   const [teachers, setTeachers] = useState<Teacher[]>(INITIAL_TEACHERS);
   const [classrooms, setClassrooms] = useState<Classroom[]>(INITIAL_CLASSROOMS);
@@ -427,6 +431,29 @@ export default function SchedulerPage() {
     setExpandedGrades((prev) => ({
       ...prev,
       [grade]: prev[grade] === false ? true : false,
+    }));
+  };
+
+  const getGroupedCoursesByRoom = () => {
+    const groups: { [key: string]: Course[] } = {};
+    
+    visibleCourses.forEach((c) => {
+      const room = classrooms.find((r) => r.id === c.defaultClassroomId);
+      const roomName = room ? `${room.name} (${room.type})` : "ไม่ระบุห้องเรียน / อื่นๆ";
+      
+      if (!groups[roomName]) {
+        groups[roomName] = [];
+      }
+      groups[roomName].push(c);
+    });
+    
+    return groups;
+  };
+
+  const toggleCourseRoom = (roomName: string) => {
+    setExpandedCourseRooms((prev) => ({
+      ...prev,
+      [roomName]: prev[roomName] === false ? true : false,
     }));
   };
 
@@ -1012,7 +1039,7 @@ export default function SchedulerPage() {
   return (
     <div className="scheduler-container">
       {/* Sidebar */}
-      <aside className="scheduler-sidebar">
+      <aside className={`scheduler-sidebar ${isSidebarOpen ? "" : "collapsed"}`}>
         <div className="logo-section">
           <div className="logo-icon">EF</div>
           <div className="logo-text">ed-flow Scheduler</div>
@@ -1158,27 +1185,85 @@ export default function SchedulerPage() {
               </div>
 
               <div className="draggable-list">
-                {visibleCourses.length > 0 ? (
-                  visibleCourses.map((course) => (
-                    <div
-                      key={course.id}
-                      className="draggable-item"
-                      draggable
-                      onDragStart={(e) => handleDragStart(e, course.id)}
-                      onDragEnd={handleDragEnd}
-                    >
-                      <div className="course-info">
-                        <span className="course-name">{course.name}</span>
-                        <span className="course-code">{course.code}</span>
+                {(() => {
+                  const groupedCourses = getGroupedCoursesByRoom();
+                  const sortedRoomNames = Object.keys(groupedCourses).sort((a, b) => {
+                    if (a.startsWith("ไม่ระบุ")) return 1;
+                    if (b.startsWith("ไม่ระบุ")) return -1;
+                    return a.localeCompare(b);
+                  });
+
+                  if (sortedRoomNames.length === 0) {
+                    return (
+                      <div style={{ fontSize: "0.8rem", color: "var(--text-secondary)", fontStyle: "italic", textAlign: "center", padding: "1rem", border: "1px dashed var(--border-color)", borderRadius: "8px" }}>
+                        ไม่พบวิชาเรียนสำหรับการแสดงผล
                       </div>
-                      <span className="course-drag-handle">☰</span>
-                    </div>
-                  ))
-                ) : (
-                  <div style={{ fontSize: "0.8rem", color: "var(--text-secondary)", fontStyle: "italic", textAlign: "center", padding: "1rem", border: "1px dashed var(--border-color)", borderRadius: "8px" }}>
-                    ไม่มีวิชาที่ระบุตัวคุณครูท่านนี้เป็นผู้สอนหลัก
-                  </div>
-                )}
+                    );
+                  }
+
+                  return sortedRoomNames.map((roomName) => {
+                    const courseList = groupedCourses[roomName];
+                    const isRoomExpanded = expandedCourseRooms[roomName] !== false; // Expanded by default
+
+                    return (
+                      <div key={roomName} className="course-room-group" style={{ marginBottom: "0.5rem" }}>
+                        <div 
+                          className="course-room-header" 
+                          onClick={() => toggleCourseRoom(roomName)}
+                          style={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            alignItems: "center",
+                            padding: "0.5rem 0.75rem",
+                            background: "rgba(255, 255, 255, 0.03)",
+                            border: "1px solid var(--border-color)",
+                            borderRadius: "6px",
+                            fontSize: "0.75rem",
+                            fontWeight: "bold",
+                            color: "var(--text-secondary)",
+                            cursor: "pointer",
+                            marginBottom: "0.25rem",
+                            userSelect: "none"
+                          }}
+                        >
+                          <span>🏫 {roomName} ({courseList.length} วิชา)</span>
+                          <span className="accordion-chevron" style={{ transition: "transform 0.2s ease" }}>{isRoomExpanded ? "▲" : "▼"}</span>
+                        </div>
+                        
+                        {isRoomExpanded && (
+                          <div className="course-room-content" style={{ display: "flex", flexDirection: "column", gap: "0.4rem", paddingLeft: "0.5rem" }}>
+                            {courseList.map((c) => {
+                              const defaultTeacher = teachers.find((t) => t.id === c.defaultTeacherId);
+                              return (
+                                <div
+                                  key={c.id}
+                                  className="draggable-item"
+                                  draggable="true"
+                                  onDragStart={(e) => handleDragStart(e, c.id)}
+                                  onDragEnd={handleDragEnd}
+                                  style={{
+                                    borderLeft: `4px solid ${c.color || "var(--accent-color)"}`,
+                                    padding: "0.5rem 0.75rem",
+                                    fontSize: "0.8rem"
+                                  }}
+                                >
+                                  <div className="course-info">
+                                    <span className="course-name" style={{ fontWeight: "600" }}>{c.name}</span>
+                                    <div style={{ display: "flex", justifyContent: "space-between", width: "100%", fontSize: "0.7rem", color: "var(--text-secondary)", marginTop: "0.15rem" }}>
+                                      <span>รหัส: {c.code}</span>
+                                      {defaultTeacher && <span>ครู: {defaultTeacher.name.split(" ")[0]}</span>}
+                                    </div>
+                                  </div>
+                                  <span className="course-drag-handle">☰</span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  });
+                })()}
               </div>
             </div>
 
@@ -1304,13 +1389,36 @@ export default function SchedulerPage() {
 
         {/* Header */}
         <header className="scheduler-header">
-          <div className="header-title-section">
-            <h1 style={{ fontSize: "1.5rem", fontWeight: 800 }}>
-              {isSettingsMode ? "ตั้งค่าข้อมูลวิชาการโรงเรียน" : "จัดตารางเรียนตารางสอน"}
-            </h1>
-            <span className="header-subtitle">
-              {isSettingsMode ? "เพิ่ม ลบ หรือแก้ไขข้อมูลคุณครู วิชาเรียน และสถานที่สำหรับจัดระบบตารางเรียน" : "ลากวิชาทางซ้ายวางลงบนตารางเพื่อจัดชั่วโมงสอนวิชาการ"}
-            </span>
+          <div className="header-title-section" style={{ display: "flex", alignItems: "center", gap: "1rem" }}>
+            <button
+              className="sidebar-toggle-btn"
+              onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+              title={isSidebarOpen ? "ซ่อนเมนูด้านซ้าย" : "แสดงเมนูด้านซ้าย"}
+              style={{
+                background: "rgba(255, 255, 255, 0.05)",
+                border: "1px solid var(--border-color)",
+                borderRadius: "8px",
+                width: "40px",
+                height: "40px",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                cursor: "pointer",
+                color: "var(--text-primary)",
+                fontSize: "1.2rem",
+                transition: "all 0.2s ease"
+              }}
+            >
+              ☰
+            </button>
+            <div>
+              <h1 style={{ fontSize: "1.5rem", fontWeight: 800, margin: 0 }}>
+                {isSettingsMode ? "ตั้งค่าข้อมูลวิชาการโรงเรียน" : "จัดตารางเรียนตารางสอน"}
+              </h1>
+              <span className="header-subtitle">
+                {isSettingsMode ? "เพิ่ม ลบ หรือแก้ไขข้อมูลคุณครู วิชาเรียน และสถานที่สำหรับจัดระบบตารางเรียน" : "ลากวิชาทางซ้ายวางลงบนตารางเพื่อจัดชั่วโมงสอนวิชาการ"}
+              </span>
+            </div>
           </div>
 
           <div className="action-controls">
