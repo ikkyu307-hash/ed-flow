@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
+import Link from "next/link";
 import "./scheduler.css";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 import { useRouter } from "next/navigation";
@@ -1043,6 +1044,13 @@ export default function SchedulerPage() {
         <div className="logo-section">
           <div className="logo-icon">EF</div>
           <div className="logo-text">ed-flow Scheduler</div>
+        </div>
+
+        <div style={{ display: "flex", flexWrap: "wrap", gap: "0.4rem", marginBottom: "0.4rem" }}>
+          <Link href="/" className="scheduler-nav-link">🏠 หน้าหลัก</Link>
+          <Link href="/attendance" className="scheduler-nav-link">✅ เช็กชื่อ</Link>
+          <Link href="/students" className="scheduler-nav-link">🧑‍🎓 นักเรียน</Link>
+          <Link href="/reports" className="scheduler-nav-link">📊 รายงาน</Link>
         </div>
 
         {/* View Controls & Settings Navigation */}

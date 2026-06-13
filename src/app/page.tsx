@@ -30,6 +30,14 @@ export default function Home() {
             <span>เข้าสู่ระบบจัดตารางเรียนตารางสอน (Scheduler)</span>
             <span>→</span>
           </Link>
+          <Link
+            href="/attendance"
+            className={styles.ctaBtn}
+            style={{ background: "linear-gradient(135deg, #34d399, #22d3ee)" }}
+          >
+            <span>เช็กชื่อเข้าเรียน (Attendance)</span>
+            <span>→</span>
+          </Link>
         </div>
       </section>
 
@@ -48,16 +56,16 @@ export default function Home() {
         </div>
 
         {/* Attendance Tracker */}
-        <div className={styles.featureCard}>
+        <Link href="/attendance" className={styles.featureCard}>
           <div className={styles.featureIcon}>✅</div>
           <h3 className={styles.featureTitle}>
             เช็กชื่อเข้าเรียน (Attendance Tracker)
           </h3>
           <p className={styles.featureDesc}>
             เช็กชื่อนักเรียนรายวันหรือรายคาบด้วยอินเทอร์เฟซที่รวดเร็ว 
-            สรุปข้อมูลสถิติการมาเรียนขาดลาสาย ส่งตรงถึงครูประจำชั้นและผู้ปกครองทันที
+            สรุปข้อมูลสถิติการมาเรียนขาดลาสาย พร้อมเช็กชื่อผ่าน QR Code และรายงานรายวัน/สัปดาห์/เดือน
           </p>
-        </div>
+        </Link>
 
         {/* Grading Hub */}
         <div className={styles.featureCard}>

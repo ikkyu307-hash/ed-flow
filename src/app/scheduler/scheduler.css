@@ -1127,3 +1127,23 @@
 }
 
 
+
+/* Cross-module navigation links (added for attendance system) */
+.scheduler-nav-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.35rem 0.6rem;
+  border-radius: 9px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  transition: 0.18s;
+}
+.scheduler-nav-link:hover {
+  color: var(--text-primary);
+  border-color: var(--border-hover);
+  box-shadow: var(--shadow-neon);
+}
